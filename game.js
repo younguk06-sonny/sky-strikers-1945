@@ -348,7 +348,7 @@ const getPlane = () => PLANES.find((p) => p.id === Store.get('plane', 'RAPTOR-X'
 
 // 적 3종: 체력·점수·충돌 반경·폭발 크기 (폭격기는 지금 단계의 중간 보스)
 const ENEMY = {
-  fighter: { key: 'e_fighter', hp: 1,  score: 100,  radius: 15, boom: 0 },
+  fighter: { key: 'e_fighter', hp: 0.5, score: 100,  radius: 15, boom: 0 },
   heli:    { key: 'e_heli',    hp: 6,  score: 400,  radius: 20, boom: 1 },
   bomber:  { key: 'e_bomber',  hp: 34, score: 2000, radius: 0,  boom: 2 },
   ship:    { key: 'g_ship',    hp: 14, score: 800,  radius: 0,  boom: 1, ground: true },   // 해상 구축함
@@ -357,15 +357,15 @@ const ENEMY = {
 
 // 중간보스 3종: 차례로 등장하고, 한 바퀴 돌 때마다 체력·점수가 35%씩 올라간다
 const MIDBOSS = {
-  gunship:  { key: 'mb_gunship',  name: '공격 헬기',  hp: 110, score: 5000, y: 190, radius: 44 },
-  fortress: { key: 'mb_fortress', name: '하늘 요새',  hp: 150, score: 7000, y: 170, size: [180, 60] },
-  ace:      { key: 'mb_ace',      name: '붉은 에이스', hp: 80,  score: 6000, y: 200, radius: 26 }
+  gunship:  { key: 'mb_gunship',  name: '공격 헬기',  hp: 320, score: 5000, y: 190, radius: 44 },
+  fortress: { key: 'mb_fortress', name: '하늘 요새',  hp: 420, score: 7000, y: 170, size: [180, 60] },
+  ace:      { key: 'mb_ace',      name: '붉은 에이스', hp: 260, score: 6000, y: 200, radius: 26 }
 };
-const CHARGE = { passive: 1.2, perDamage: 0.35 };
+const CHARGE = { passive: 1.0, perDamage: 0.09 };
 // 파워 1~7단계: 단계별 연사 간격 배율·피해 배율 (1단계가 가장 약함)
-const POWER = { max: 7, rateMul: [1.4, 1.3, 1.2, 1.1, 1.0, 0.95, 0.88], dmgMul: [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.35] };
+const POWER = { max: 7, rateMul: [1.4, 1.3, 1.2, 1.1, 1.0, 0.95, 0.88], dps: [14, 18, 22, 27, 32, 38, 45] };
 // 격추 시 P 아이템이 떨어질 확률 (폭격기는 반드시, 중간보스는 B+P)
-const DROP = { fighter: 0.07, heli: 0.25, bomber: 1, ship: 0.3, tank: 0.12, pity: 22 };
+const DROP = { fighter: 0.025, heli: 0.1, bomber: 0.4, ship: 0.15, tank: 0.06, pity: 40 };
 
 // 5개 스테이지: 배경·지상(해상) 적·중간보스·최종 보스가 각각 다름
 const STAGES = [
@@ -380,40 +380,40 @@ const STAGE_TIME = { mid: 38, boss: 80 };   // 스테이지 시작 후 중간보
 // 스테이지 보스: 체력 66%·33%에서 공격 패턴이 바뀌는 3단계
 // guns = 보스 중심 기준 포구 위치, phases = 단계별 공격 목록
 const BOSSES = {
-  kraken: { key: 'b_kraken', name: '강철 전함 크라켄', hp: 420, y: 175, size: [140, 220],
+  kraken: { key: 'b_kraken', name: '강철 전함 크라켄', hp: 1300, y: 175, size: [140, 220],
     guns: [[-48, -70], [48, -70], [0, 0], [-44, 70], [44, 70]],
     phases: [
       [{ p: 'guns', every: 1.5, speed: 190 }, { p: 'ring', every: 3.2, n: 16, speed: 110, gun: 2 }],
       [{ p: 'fan', every: 1.5, n: 5, spread: 0.16, speed: 210, gun: 2 }, { p: 'spiral', every: 0.07, arms: 2, step: 0.27, speed: 150, gun: 2, dur: 2.0, rest: 1.6 }],
       [{ p: 'guns', every: 1.0, speed: 220 }, { p: 'spiral', every: 0.06, arms: 3, step: 0.23, speed: 155, gun: 2, dur: 2.4, rest: 1.3 }, { p: 'big', every: 2.4, n: 3, speed: 230, gun: 4 }]
     ] },
-  titan: { key: 'b_titan', name: '사막의 거인 타이탄', hp: 560, y: 170, size: [200, 160],
+  titan: { key: 'b_titan', name: '사막의 거인 타이탄', hp: 1700, y: 170, size: [200, 160],
     guns: [[-80, -40], [80, -40], [-80, 50], [80, 50], [0, 0]],
     phases: [
-      [{ p: 'guns', every: 1.4, speed: 190 }, { p: 'curtain', every: 2.6, n: 9, speed: 140 }],
+      [{ p: 'guns', every: 1.3, speed: 185 }, { p: 'curtain', every: 3.0, n: 7, speed: 135 }],
       [{ p: 'ring', every: 2.2, n: 20, speed: 120, gun: 4 }, { p: 'fan', every: 1.6, n: 7, spread: 0.15, speed: 200, gun: 4 }],
-      [{ p: 'spiral', every: 0.06, arms: 4, step: 0.2, speed: 150, gun: 4, dur: 2.6, rest: 1.2 }, { p: 'big', every: 2.0, n: 3, speed: 240, gun: 2 }, { p: 'curtain', every: 3.0, n: 9, speed: 150 }]
+      [{ p: 'spiral', every: 0.085, arms: 4, step: 0.2, speed: 145, gun: 4, dur: 2.4, rest: 1.4 }, { p: 'big', every: 2.4, n: 3, speed: 230, gun: 2 }, { p: 'curtain', every: 3.4, n: 9, speed: 140 }]
     ] },
-  ironbird: { key: 'b_ironbird', name: '초대형 폭격기 아이언버드', hp: 700, y: 160, size: [240, 70],
+  ironbird: { key: 'b_ironbird', name: '초대형 폭격기 아이언버드', hp: 2100, y: 160, size: [240, 70],
     guns: [[-100, 10], [100, 10], [-50, 20], [50, 20], [0, 40]],
     phases: [
-      [{ p: 'fan', every: 1.6, n: 3, spread: 0.2, speed: 200, gun: 0 }, { p: 'fan', every: 1.6, n: 3, spread: 0.2, speed: 200, gun: 1 }, { p: 'curtain', every: 2.8, n: 11, speed: 140 }],
+      [{ p: 'fan', every: 2.0, n: 3, spread: 0.2, speed: 190, gun: 0 }, { p: 'fan', every: 2.0, n: 3, spread: 0.2, speed: 190, gun: 1 }, { p: 'curtain', every: 3.4, n: 9, speed: 130 }],
       [{ p: 'guns', every: 0.8, speed: 220, only: [2, 3] }, { p: 'ring', every: 2.4, n: 22, speed: 120, gun: 4 }],
-      [{ p: 'spiral', every: 0.05, arms: 2, step: 0.31, speed: 170, gun: 4, dur: 2.2, rest: 1.0 }, { p: 'curtain', every: 2.4, n: 11, speed: 150 }, { p: 'big', every: 2.2, n: 3, speed: 240, gun: 4 }]
+      [{ p: 'spiral', every: 0.07, arms: 2, step: 0.31, speed: 160, gun: 4, dur: 2.0, rest: 1.3 }, { p: 'curtain', every: 3.0, n: 9, speed: 140 }, { p: 'big', every: 2.6, n: 3, speed: 230, gun: 4 }]
     ] },
-  airship: { key: 'b_airship', name: '공중 요새 발할라', hp: 860, y: 170, size: [220, 140],
+  airship: { key: 'b_airship', name: '공중 요새 발할라', hp: 2500, y: 170, size: [220, 140],
     guns: [[-95, 30], [95, 30], [0, 70], [-40, -50], [40, -50]],
     phases: [
       [{ p: 'ring', every: 2.2, n: 20, speed: 105, gun: 2 }, { p: 'guns', every: 1.5, speed: 200, only: [0, 1] }],
       [{ p: 'spiral', every: 0.06, arms: 3, step: 0.25, speed: 150, gun: 2, dur: 2.4, rest: 1.2 }, { p: 'fan', every: 1.7, n: 7, spread: 0.15, speed: 205, gun: 2 }],
       [{ p: 'ring', every: 1.5, n: 26, speed: 115, gun: 2 }, { p: 'spiral', every: 0.07, arms: 2, step: -0.28, speed: 165, gun: 3, dur: 2.0, rest: 1.0 }, { p: 'big', every: 2.0, n: 3, speed: 240, gun: 2 }]
     ] },
-  omega: { key: 'b_omega', name: '최종 병기 오메가', hp: 1150, y: 160, size: [250, 100],
+  omega: { key: 'b_omega', name: '최종 병기 오메가', hp: 3200, y: 160, size: [250, 100],
     guns: [[-110, 20], [110, 20], [-55, 30], [55, 30], [0, 50]],
     phases: [
       [{ p: 'fan', every: 1.4, n: 7, spread: 0.14, speed: 210, gun: 4 }, { p: 'guns', every: 1.2, speed: 210, only: [0, 1] }],
-      [{ p: 'spiral', every: 0.06, arms: 4, step: 0.22, speed: 155, gun: 4, dur: 2.6, rest: 1.1 }, { p: 'curtain', every: 2.6, n: 11, speed: 145 }],
-      [{ p: 'spiral', every: 0.06, arms: 5, step: 0.19, speed: 155, gun: 4, dur: 3.0, rest: 1.0 }, { p: 'ring', every: 2.2, n: 22, speed: 125, gun: 4 }, { p: 'big', every: 1.8, n: 3, speed: 245, gun: 4 }, { p: 'guns', every: 1.4, speed: 215, only: [2, 3] }]
+      [{ p: 'spiral', every: 0.09, arms: 4, step: 0.22, speed: 150, gun: 4, dur: 2.2, rest: 1.4 }, { p: 'curtain', every: 3.2, n: 9, speed: 140 }],
+      [{ p: 'spiral', every: 0.1, arms: 5, step: 0.19, speed: 150, gun: 4, dur: 2.6, rest: 1.3 }, { p: 'ring', every: 2.6, n: 20, speed: 120, gun: 4 }, { p: 'big', every: 2.2, n: 3, speed: 235, gun: 4 }, { p: 'guns', every: 1.6, speed: 205, only: [2, 3] }]
     ] }
 };
 
@@ -2143,16 +2143,18 @@ class GameScene extends Phaser.Scene {
   // 기체별 무기 (파워 1~7단계에 따라 탄 수·연사·피해가 늘어남)
   updateFiring(dt) {
     const p = this.player, id = this.plane.id, L = this.state.power, i = L - 1;
-    const rm = POWER.rateMul[i], dm = POWER.dmgMul[i];
+    const rm = POWER.rateMul[i], dps = POWER.dps[i];
+    const base = { 'RAPTOR-X': 0.1, 'PHANTOM-Z': 0.065, 'THUNDER-A': 0.15, 'BLAZE-F': 0.17 }[id];
+    const rate = base * rm;
     this.fireTimer -= dt;
     if (this.fireTimer <= 0) {
-      const base = { 'RAPTOR-X': 0.1, 'PHANTOM-Z': 0.065, 'THUNDER-A': 0.15, 'BLAZE-F': 0.17 }[id];
-      this.fireTimer = Math.max(0, this.fireTimer + base * rm);
+      this.fireTimer = Math.max(0, this.fireTimer + rate);
       if (id === 'PHANTOM-Z') {                       // 레이저: 1줄 → 2줄(3단계) → 3줄(5단계), 7단계 굵게
         const xs = L >= 5 ? [-12, 0, 12] : L >= 3 ? [-7, 7] : [0];
-        xs.forEach((ox) => this.firePlayerBullet(p.x + ox, p.y - 32, { kind: 'laser', vy: -1300, dmg: 0.8 * dm, pierce: true, scale: L >= 7 ? 1.3 : 1 }));
+        xs.forEach((ox) => this.firePlayerBullet(p.x + ox, p.y - 32, { kind: 'laser', vy: -1300, dmg: dps * rate / xs.length, pierce: true, scale: L >= 7 ? 1.3 : 1 }));
       } else if (id === 'THUNDER-A') {                // 확산탄: 2발 → 3갈래 → 5갈래 → 7갈래
         const ways = [2, 3, 3, 5, 5, 7, 7][i], step = L >= 6 ? 0.13 : 0.16;
+        const dm = dps * rate / Math.max(1.8, ways * 0.55);
         if (ways === 2) [-6, 6].forEach((ox) => this.firePlayerBullet(p.x + ox, p.y - 22, { kind: 'pb', vy: -840, dmg: dm }));
         else for (let k = 0; k < ways; k++) {
           const a = (k - (ways - 1) / 2) * step;
@@ -2161,11 +2163,11 @@ class GameScene extends Phaser.Scene {
       } else if (id === 'BLAZE-F') {                  // 폭발탄: 1발 → 2발 → 3발 → 4발
         const n = [1, 2, 2, 3, 3, 4, 4][i];
         const offs = n === 1 ? [0] : n === 2 ? [-8, 8] : n === 3 ? [-12, 0, 12] : [-18, -6, 6, 18];
-        offs.forEach((ox) => this.firePlayerBullet(p.x + ox, p.y - 22, { kind: 'shell', angle: ox * 0.006, speed: 720, dmg: 2 * dm, splash: true }));
+        offs.forEach((ox) => this.firePlayerBullet(p.x + ox, p.y - 22, { kind: 'shell', angle: ox * 0.006, speed: 720, dmg: dps * 0.95 * rate / n, splash: true }));
       } else {                                        // 기관포: 2발 → 5발, 5단계부터 양옆 사선탄
-        const n = [2, 3, 3, 4, 4, 4, 5][i];
+        const n = [2, 2, 3, 3, 4, 4, 5][i], dm = dps * 0.85 * rate / n;
         for (let k = 0; k < n; k++) this.firePlayerBullet(p.x + (k - (n - 1) / 2) * 9, p.y - 22, { kind: 'pb', vy: -920, dmg: dm });
-        if (L >= 5) [-1, 1].forEach((sd) => this.firePlayerBullet(p.x + sd * 14, p.y - 16, { kind: 'pb', angle: sd * 0.22, speed: 900, dmg: dm }));
+        if (L >= 6) [-1, 1].forEach((sd) => this.firePlayerBullet(p.x + sd * 14, p.y - 16, { kind: 'pb', angle: sd * 0.22, speed: 900, dmg: dm }));
       }
       this.muzzle.setVisible(true).setPosition(p.x, p.y - 30).setScale(0.24 + Math.random() * 0.12);
       this.muzzleT = 0.04;
@@ -2180,7 +2182,7 @@ class GameScene extends Phaser.Scene {
         this.missileSide = -(this.missileSide || 1);
         for (let k = 0; k < mc; k++) {
           const sd = (k % 2 === 0 ? 1 : -1) * this.missileSide, wide = 1 + Math.floor(k / 2) * 0.7;
-          this.firePlayerBullet(p.x + sd * 18, p.y - 4, { kind: 'missile', vx: sd * 160 * wide, vy: -260, dmg: 2 * dm });
+          this.firePlayerBullet(p.x + sd * 18, p.y - 4, { kind: 'missile', vx: sd * 160 * wide, vy: -260, dmg: Math.max(1.2, dps * 0.2 * 0.75 / mc) });
         }
       }
     }
@@ -2554,7 +2556,7 @@ class GameScene extends Phaser.Scene {
         this.time.delayedCall(i * 35, () => {
           if (this.state.dead || this.state.over) return;
           const a = -Math.PI + (i + 0.5) * (Math.PI / 14);
-          this.firePlayerBullet(this.player.x, this.player.y - 6, { kind: 'missile', vx: Math.cos(a) * 280, vy: Math.sin(a) * 280, dmg: 4, scale: 1.3 });
+          this.firePlayerBullet(this.player.x, this.player.y - 6, { kind: 'missile', vx: Math.cos(a) * 280, vy: Math.sin(a) * 280, dmg: 6, scale: 1.3 });
         });
       }
       this.time.delayedCall(800, () => { this.specialActive = false; });
@@ -2596,7 +2598,7 @@ class GameScene extends Phaser.Scene {
         g.fillStyle(0xffffff, 0.8); g.fillCircle(p.x, bottom, 16);
         this.enemies.getChildren().slice().forEach((e) => {
           if (!e.active || e.y > bottom || e.y < -40) return;
-          if (Math.abs(e.x - p.x) < w / 2 + e.displayWidth * 0.35) this.damageEnemy(e, 36 * dt);
+          if (Math.abs(e.x - p.x) < w / 2 + e.displayWidth * 0.35) this.damageEnemy(e, 50 * dt);
         });
         this.eBullets.children.each((b) => {
           if (b.active && b.y < bottom && Math.abs(b.x - p.x) < w / 2 + 6) b.disableBody(true, true);
@@ -2617,7 +2619,7 @@ class GameScene extends Phaser.Scene {
         w.fireT -= dt;
         if (w.fireT <= 0 && !s.dead) {
           w.fireT = 0.12;
-          this.firePlayerBullet(w.x, w.y - 16, { kind: 'pb', vy: -920, dmg: 1 });
+          this.firePlayerBullet(w.x, w.y - 16, { kind: 'pb', vy: -920, dmg: 0.5 });
         }
       });
       if (leaving && this.wingmen.every((w) => w.y < -60)) {
@@ -2651,7 +2653,7 @@ class GameScene extends Phaser.Scene {
     this.clearBullets(x, y, 200, true);
     this.time.delayedCall(80, () => {
       this.enemies.getChildren().slice().forEach((e) => {
-        if (e.active && Phaser.Math.Distance.Between(x, y, e.x, e.y) < 175) this.damageEnemy(e, 30);
+        if (e.active && Phaser.Math.Distance.Between(x, y, e.x, e.y) < 175) this.damageEnemy(e, 60);
       });
       this.specialActive = false;
     });
@@ -2679,7 +2681,7 @@ class GameScene extends Phaser.Scene {
 
   spawnMidBoss(kind) {
     const def = MIDBOSS[kind];
-    const k = 1 + this.stageIdx * 0.4;          // 뒤 스테이지일수록 단단함
+    const k = 1 + this.stageIdx * 0.3;          // 뒤 스테이지일수록 단단함
     const e = this.enemies.create(GAME_W / 2, -70, def.key);
     e.setDepth(4);
     e.body.moves = false;
@@ -2714,7 +2716,7 @@ class GameScene extends Phaser.Scene {
       if (!e.dest || e.destT <= 0) {
         e.dest = { x: rand(60, W - 60), y: rand(110, 330) };
         e.destT = ph2 ? 1.1 : 1.6;
-        e.burst = ph2 ? 8 : 6;
+        e.burst = ph2 ? 7 : 5;
         e.burstCd = 0.35;
       }
       e.destT -= dt;
@@ -2758,7 +2760,7 @@ class GameScene extends Phaser.Scene {
       e.burstCd -= dt;
       if (e.burstCd <= 0) {
         e.burstCd = 0.08; e.burst--;
-        this.fireFanAtPlayer(e, ph2 ? 3 : 1, 0.2, 270, false);
+        this.fireFanAtPlayer(e, ph2 ? 3 : 1, 0.24, 245, false);
       }
     }
   }
@@ -2801,8 +2803,8 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ------------------------- 난이도 ------------------------- */
-  difficulty() { return Math.min(1 + this.stageIdx * 0.4 + this.stage.t / 110, 3.5); }
-  bulletMul() { return 1 + Math.min(this.stageIdx * 0.07 + this.stage.t / 300, 0.4); }
+  difficulty() { return Math.min(1 + this.stageIdx * 0.45 + this.stage.t / 110, 3.6); }
+  bulletMul() { return 1 + Math.min(this.stageIdx * 0.07 + this.stage.t / 350, 0.36); }
 
   /* ------------------------- 적 등장 ------------------------- */
   spawnDirector(dt) {
@@ -2909,7 +2911,7 @@ class GameScene extends Phaser.Scene {
     Object.assign(e, {
       etype: 'sboss', bid: id, name: def.name, hp: def.hp, maxHp: def.hp, score: 0,
       t: 0, entered: false, mode: 'enter', targetY: def.y, maxLife: Infinity, phase: 1,
-      pat: def.phases.map((ph) => ph.map(() => ({ cd: rand(0.8, 1.6), t: 0, on: true, ang: Math.random() * 6 })))
+      pat: def.phases.map((ph) => ph.map(() => ({ cd: rand(2.0, 2.8), t: 0, on: true, ang: Math.random() * 6 })))
     });
     this.addShadow(e, true);
     this.stageBoss = e;
@@ -2956,8 +2958,9 @@ class GameScene extends Phaser.Scene {
     else if (pt.p === 'ring') { const o = gun(pt.gun); this.fireRing(o.x, o.y, pt.n, pt.speed); }
     else if (pt.p === 'big') this.fireFanAtPlayer(gun(pt.gun), pt.n, 0.14, pt.speed, true);
     else if (pt.p === 'guns') {
+      ps.alt = !ps.alt;
       def.guns.forEach((g, gi) => {
-        if (pt.only && !pt.only.includes(gi)) return;
+        if (pt.only ? !pt.only.includes(gi) : (gi % 2 === 0) !== ps.alt) return;
         this.fireFanAtPlayer({ x: e.x + g[0], y: e.y + g[1] }, 1, 0, pt.speed, false);
       });
     } else if (pt.p === 'curtain') {               // 아래로 쏟아지는 탄 커튼 (사이사이 빈틈)
@@ -3011,12 +3014,16 @@ class GameScene extends Phaser.Scene {
 
   stageClear(bonus) {
     if (this.state.over) return;
+    const s = this.state;
+    let reward;
+    if (s.mode === 'normal' && s.hp < s.maxHp) { s.hp++; this.updateLifeUi(); reward = '하트 +1 회복'; }
+    else { s.bombs = Math.min(s.bombs + 1, 6); this.updateBombUi(); reward = '폭탄 +1'; }
     const W = GAME_W, H = GAME_H, pl = this.plane.pilot;
     const c = this.add.container(0, 0).setDepth(150).setAlpha(0);
     c.add([
       this.add.rectangle(0, H / 2 - 60, W, 230, 0x000814, 0.6).setOrigin(0, 0.5),
       txt(this, W / 2, H / 2 - 140, 'STAGE ' + (this.stageIdx + 1) + ' CLEAR!', 38, '#ffe066', { stroke: '#3a1d00', strokeThickness: 7 }),
-      txt(this, W / 2, H / 2 - 96, 'BOSS BONUS  +' + fmt(bonus), 18, '#ffffff', { stroke: '#000000', strokeThickness: 4 }),
+      txt(this, W / 2, H / 2 - 96, 'BOSS BONUS  +' + fmt(bonus) + '   ·   ' + reward, 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }),
       this.add.image(W / 2 - 100, H / 2 - 30, pl.face).setScale(0.85),
       this.add.text(W / 2 - 66, H / 2 - 30, pl.name + '\n' + pl.quote, { fontFamily: FONT, resolution: ZOOM, fontSize: '14px', color: '#ffffff', lineSpacing: 4 }).setOrigin(0, 0.5)
     ]);
@@ -3170,7 +3177,9 @@ class GameScene extends Phaser.Scene {
     if (!e.fired && e.y > 0 && e.x > 0 && e.x < GAME_W) {
       e.visT = (e.visT || 0) + dt;
       if (e.visT > e.fireAt) {
-        e.fired = true;
+        e.shots = (e.shots || 0) + 1;
+        e.fired = e.shots >= (this.stageIdx >= 2 ? 2 : 1);
+        e.visT = e.fireAt - 0.5;
         if (this.player.y - e.y > 160) this.fireFanAtPlayer(e, 1, 0, 210, false);
       }
     }
@@ -3429,7 +3438,7 @@ class GameScene extends Phaser.Scene {
     this.playerShadow.setVisible(true);
     this.trail.start();
     this.target.x = GAME_W / 2; this.target.y = GAME_H - 170;
-    this.invuln = 2.5;
+    this.invuln = 3.2;
     this.fireTimer = 0.4;
   }
 
@@ -3453,7 +3462,7 @@ class GameScene extends Phaser.Scene {
     c.add([num, txt(this, W / 2, 450, '남은 크레딧 ' + s.credits + ' · 점수는 이어져요', 14, '#9ec9ff')]);
 
     const close = () => { if (this.contTimer) this.contTimer.remove(); this.contTimer = null; c.destroy(); };
-    const yes = makeButton(this, W / 2, 510, 240, 60, '이어하기', () => {
+    const yes = this.contYes = makeButton(this, W / 2, 510, 240, 60, '이어하기', () => {
       close();
       s.credits--; s.continues++;
       s.lives = ARCADE.lives;
