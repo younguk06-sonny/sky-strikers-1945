@@ -4046,7 +4046,7 @@ const config = {
   scene: [BootScene, MenuScene, GameScene, PauseScene]
 };
 
-function startGame() { new Phaser.Game(config); }
+function startGame() { window.__ssGame = new Phaser.Game(config); }
 if (document.fonts && document.fonts.load) {
   Promise.race([
     document.fonts.load("40px 'Russo One'"),

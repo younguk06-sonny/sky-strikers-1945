@@ -30,7 +30,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Russo+One&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=202611200900">
+  <link rel="stylesheet" href="style.css?v=202611200940">
 </head>
 <body>
   <div id="game"></div>
@@ -50,10 +50,64 @@
     </div>
   </div>
 
-  <!-- Phaser 3 게임 엔진 (CDN). 오프라인에서 쓰려면 phaser.min.js를 받아 같은 폴더에 두고 src만 바꾸면 됩니다. -->
+  <!-- 뒤로가기 종료 확인창 -->
+  <div id="exit-modal" class="hidden">
+    <div class="nm-box">
+      <div class="nm-title ex-title">게임을 종료할까요?</div>
+      <div class="nm-msg ex-msg">진행 중인 게임은 저장되지 않아요</div>
+      <div class="nm-row">
+        <button id="ex-no" class="nm-btn nm-sub" type="button">계속하기</button>
+        <button id="ex-yes" class="nm-btn" type="button">종료</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phaser 3 게임 엔진 (같은 폴더에 내장 — 인터넷 없이 동작) -->
   <script src="phaser.min.js"></script>
-  <script src="game.js?v=202611200900"></script>
+  <script src="game.js?v=202611200940"></script>
   <script>
+    // 휴대폰 뒤로가기 → 종료 확인창
+    (function () {
+      var modal = document.getElementById('exit-modal');
+      var leaving = false;
+      function guard() { history.pushState({ ssGuard: 1 }, ''); }
+      function isOpen() { return !modal.classList.contains('hidden'); }
+      function pauseGame() {
+        try {
+          var g = window.__ssGame;
+          var gs = g && g.scene.getScene('Game');
+          if (gs && gs.sys.isActive() && gs.openPause) gs.openPause();
+        } catch (e) { /* 무시 */ }
+      }
+      // 크롬은 사용자가 화면을 한 번 만진 뒤에 넣은 기록만 뒤로가기에서 멈춰 준다
+      var armed = false;
+      function arm() {
+        if (armed) return;
+        armed = true;
+        guard();
+        window.removeEventListener('pointerdown', arm, true);
+        window.removeEventListener('keydown', arm, true);
+      }
+      window.addEventListener('pointerdown', arm, true);
+      window.addEventListener('keydown', arm, true);
+      window.addEventListener('popstate', function () {
+        if (leaving) return;
+        guard();
+        var nm = document.getElementById('name-modal');
+        if (nm && !nm.classList.contains('hidden')) { document.getElementById('nm-cancel').click(); return; }
+        if (isOpen()) { modal.classList.add('hidden'); return; }
+        pauseGame();
+        modal.classList.remove('hidden');
+      });
+      document.getElementById('ex-no').onclick = function () { modal.classList.add('hidden'); };
+      document.getElementById('ex-yes').onclick = function () {
+        leaving = true;
+        modal.classList.add('hidden');
+        try { window.close(); } catch (e) { /* 무시 */ }
+        history.go(-2);
+      };
+    })();
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
     }

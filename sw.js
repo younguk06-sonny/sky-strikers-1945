@@ -2,7 +2,7 @@
  * 한 번 온라인으로 열면 게임 파일을 휴대폰에 저장해 두고,
  * 인터넷이 없을 때는 저장된 파일로 실행한다.
  * 인터넷이 있을 때는 항상 새 파일을 먼저 받아서 업데이트가 바로 반영된다. */
-const CACHE = 'sky-strikers-v2';
+const CACHE = 'sky-strikers-v3';
 const CORE = [
   './',
   './index.html',

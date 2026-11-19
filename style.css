@@ -50,6 +50,14 @@ html, body {
   background: rgba(0, 8, 20, 0.6);
 }
 #name-modal.hidden { display: none; }
+#exit-modal {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 8, 20, 0.72);
+}
+#exit-modal.hidden { display: none; }
+.ex-title { font-size: 22px; letter-spacing: -0.5px; white-space: nowrap; }
+.ex-msg { white-space: nowrap; }
 .nm-box {
   width: min(320px, 86vw);
   padding: 22px 20px 18px;
