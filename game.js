@@ -325,6 +325,15 @@ const ENEMY = {
   bomber:  { key: 'e_bomber',  hp: 34, score: 2000, radius: 0,  boom: 2 }
 };
 
+// 중간보스 3종: 차례로 등장하고, 한 바퀴 돌 때마다 체력·점수가 35%씩 올라간다
+const MIDBOSS = {
+  gunship:  { key: 'mb_gunship',  name: '공격 헬기',  hp: 110, score: 5000, y: 190, radius: 44 },
+  fortress: { key: 'mb_fortress', name: '하늘 요새',  hp: 150, score: 7000, y: 170, size: [180, 60] },
+  ace:      { key: 'mb_ace',      name: '붉은 에이스', hp: 80,  score: 6000, y: 200, radius: 26 }
+};
+const MIDBOSS_ORDER = ['gunship', 'fortress', 'ace'];
+const CHARGE = { passive: 1.2, perDamage: 0.35 };   // 초당 자동 충전량, 피해 1당 충전량 (100이면 가득)
+
 /* ---------------------------------------------------------------------
  * 공통 UI 도우미
  * ------------------------------------------------------------------- */
@@ -480,6 +489,54 @@ function drawBlaze(g) { // 주황·빨강 공격기
   g.fillStyle(0xffb347, 1); g.fillEllipse(27, 20, 2.5, 4);
 }
 
+function drawGunship(g) { // 120×116 대형 공격 헬기 (기수 아래)
+  g.fillStyle(0x2f4430, 1); g.fillRoundedRect(55, 2, 10, 50, 4);
+  g.fillStyle(0x223322, 1); g.fillRect(40, 2, 40, 7);
+  g.fillStyle(0x223322, 1); g.fillRect(6, 56, 108, 9);
+  g.fillStyle(0x3a3a3a, 1); g.fillRoundedRect(4, 52, 18, 24, 4); g.fillRoundedRect(98, 52, 18, 24, 4);
+  g.fillStyle(0xff5d5d, 1); g.fillCircle(9, 75, 2.5); g.fillCircle(17, 75, 2.5); g.fillCircle(103, 75, 2.5); g.fillCircle(111, 75, 2.5);
+  g.fillStyle(0x3d5a3a, 1); g.fillEllipse(60, 66, 56, 80);
+  g.fillStyle(0x56794f, 1); g.fillEllipse(52, 58, 18, 40);
+  g.fillStyle(0xc23b3b, 1); g.fillRect(45, 40, 30, 4);
+  g.fillStyle(0x1e2c33, 1); g.fillEllipse(60, 96, 30, 22);
+  g.fillStyle(0x9ed8ff, 0.8); g.fillEllipse(55, 94, 10, 7);
+  g.fillStyle(0x222222, 1); g.fillRect(57, 104, 6, 11);
+}
+
+function drawFortress(g) { // 200×124 하늘 요새 (6발 대형 폭격기)
+  const b = 0x4a5563, d = 0x2f3742, l = 0x6f7d8d;
+  g.fillStyle(d, 1); g.fillRoundedRect(66, 2, 68, 14, 5);
+  g.fillStyle(d, 1); g.fillRoundedRect(2, 44, 196, 28, 10);
+  g.fillStyle(b, 1); g.fillRoundedRect(2, 40, 196, 26, 10);
+  g.fillStyle(l, 1); g.fillRect(10, 43, 180, 3);
+  [22, 50, 78, 122, 150, 178].forEach((x) => {
+    g.fillStyle(d, 1); g.fillRoundedRect(x - 7, 50, 14, 26, 5);
+    g.fillStyle(0xff8a3d, 0.8); g.fillRect(x - 4, 76, 8, 3);
+  });
+  g.fillStyle(d, 1); g.fillRoundedRect(84, 0, 32, 118, 14);
+  g.fillStyle(b, 1); g.fillRoundedRect(87, 3, 26, 110, 12);
+  g.fillStyle(0xd23b3b, 1); g.fillRect(90, 22, 20, 5);
+  g.fillStyle(0x1e2c33, 1); g.fillEllipse(100, 112, 22, 18);
+  g.fillStyle(0x9ed8ff, 0.7); g.fillEllipse(96, 110, 7, 6);
+  [[30, 58], [170, 58], [100, 62]].forEach(([x, y]) => {
+    g.fillStyle(0x22272e, 1); g.fillCircle(x, y, 8);
+    g.fillStyle(0xd23b3b, 1); g.fillCircle(x, y, 3);
+  });
+}
+
+function drawAce(g) { // 76×76 붉은 에이스기 (기수 아래)
+  g.fillStyle(0x5a1010, 1); g.fillRoundedRect(24, 2, 28, 9, 4);
+  g.fillStyle(0x2a0a0a, 1); g.fillRoundedRect(2, 26, 72, 17, 7);
+  g.fillStyle(0xb81d24, 1); g.fillRoundedRect(2, 24, 72, 15, 7);
+  g.fillStyle(0xffc93c, 1); g.fillRect(6, 34, 64, 3);
+  g.fillStyle(0x1a1a1a, 1); g.fillRoundedRect(30, 2, 16, 66, 8);
+  g.fillStyle(0xc0272d, 1); g.fillRoundedRect(32, 4, 12, 58, 6);
+  g.fillStyle(0xffc93c, 1); g.fillTriangle(30, 60, 46, 60, 38, 74);
+  g.fillStyle(0x111111, 0.8); g.fillRect(26, 72, 24, 2);
+  g.fillStyle(0x222b33, 1); g.fillEllipse(38, 42, 9, 14);
+  g.fillStyle(0xffc93c, 1); g.fillCircle(14, 31, 4); g.fillCircle(62, 31, 4);
+}
+
 function drawFighter(g) { // 44×44, 기수가 아래
   g.fillStyle(0x7a2424, 1); g.fillRoundedRect(12, 2, 20, 6, 3);
   g.fillStyle(0x7a2424, 1); g.fillRoundedRect(1, 17, 42, 11, 5);
@@ -572,6 +629,9 @@ class BootScene extends Phaser.Scene {
     tex('e_heli', 52, 64, drawHeli);
     tex('rotor', 72, 72, drawRotor);
     tex('e_bomber', 128, 88, drawBomber);
+    tex('mb_gunship', 120, 116, drawGunship);
+    tex('mb_fortress', 200, 124, drawFortress);
+    tex('mb_ace', 76, 76, drawAce);
 
     tex('pb', 8, 22, (g) => {
       g.fillStyle(0xffb300, 0.45); g.fillRoundedRect(0, 2, 8, 20, 4);
@@ -707,8 +767,8 @@ class MenuScene extends Phaser.Scene {
     const sBtn = makeButton(this, W / 2 - 66, 684, 124, 44, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15).setDepth(20);
     const vBtn = makeButton(this, W / 2 + 66, 684, 124, 44, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15).setDepth(20);
 
-    txt(this, W / 2, 760, '드래그로 이동 · 자동 발사 · BOMB 버튼', 13, '#9ec9ff').setDepth(20);
-    txt(this, W / 2, 782, 'PC: 방향키·WASD 이동 · SPACE 폭탄 · P 일시정지', 11.5, '#6f8fb5').setDepth(20);
+    txt(this, W / 2, 760, '드래그 이동 · 자동 발사 · CHARGE · BOMB', 13, '#9ec9ff').setDepth(20);
+    txt(this, W / 2, 782, 'PC: 방향키·WASD · C 차지 · SPACE 폭탄 · P 정지', 11.5, '#6f8fb5').setDepth(20);
 
     this.hangar = this.buildHangar();
     this.ranking = this.buildRanking();
@@ -895,12 +955,23 @@ class GameScene extends Phaser.Scene {
       dead: false,     // 오락실 모드에서 격추되어 다시 나오기 전
       frozen: false,   // 이어하기 카운트다운 중
       over: false,
-      best: getBest(mode)
+      best: getBest(mode),
+      charge: 0        // 차지 게이지 0~100
     };
     this.fireTimer = 0;
     this.muzzleT = 0;
     this.missileT = 0.5;
     this.bombT = 0;
+    this.specialActive = false;
+    this.beamT = 0;
+    this.beamGfx = null;     // 재시작 시 예전 그래픽 참조가 남지 않게
+    this.wingT = 0;
+    this.wingmen = [];
+    this.fireball = null;
+    this.midT = 38;          // 첫 중간보스까지 남은 시간
+    this.midBoss = null;
+    this.midCycle = 0;
+    this.warningOn = false;
     this.spawnT = 1.6;
     this.islandT = 3;
     this.cloudT = 1;
@@ -929,7 +1000,7 @@ class GameScene extends Phaser.Scene {
 
     // ---- 오브젝트 그룹 (탄은 재사용 풀) ----
     this.pBullets = this.physics.add.group({ maxSize: 140 });
-    this.eBullets = this.physics.add.group({ maxSize: 260 });
+    this.eBullets = this.physics.add.group({ maxSize: 340 });
     this.enemies = this.physics.add.group();
 
     // ---- 파티클 ----
@@ -965,6 +1036,8 @@ class GameScene extends Phaser.Scene {
       this.input.keyboard.on('keydown-ESC', () => this.openPause());
       this.input.keyboard.on('keydown-SPACE', () => this.useBomb());
       this.input.keyboard.on('keydown-B', () => this.useBomb());
+      this.input.keyboard.on('keydown-C', () => this.useSpecial());
+      this.input.keyboard.on('keydown-X', () => this.useSpecial());
     }
 
     const onVis = () => { if (document.hidden) this.openPause(); };
@@ -979,7 +1052,7 @@ class GameScene extends Phaser.Scene {
     this.buildHud();
 
     const banner = txt(this, W / 2, H / 2 - 60, mode === 'arcade' ? 'ARCADE MODE' : 'READY', 34, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(40);
-    const hint = txt(this, W / 2, H - 150, '드래그로 이동 · 위급할 땐 BOMB', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
+    const hint = txt(this, W / 2, H - 150, '게이지가 차면 왼쪽 아래 CHARGE!', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
     this.tweens.add({ targets: [banner, hint], alpha: 0, delay: 2200, duration: 600, onComplete: () => { banner.destroy(); hint.destroy(); } });
   }
 
@@ -1031,7 +1104,24 @@ class GameScene extends Phaser.Scene {
     this.bombBtn = bb;
     this.updateBombUi();
 
-    this.comboText = txt(this, W / 2, 132, '', 30, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(45).setAlpha(0);
+    // 차지 버튼 (왼쪽 아래): 게이지가 다 차면 빛나고, 누르면 기체별 특수 공격
+    const cb = this.add.container(60, H - 78).setDepth(60);
+    this.chargeGfx = this.add.graphics();
+    this.chargeLabel = txt(this, 0, -12, 'CHARGE', 11, '#cfe3ff');
+    this.chargeValue = txt(this, 0, 9, '0%', 18, '#ffffff');
+    cb.add([this.chargeGfx, this.chargeLabel, this.chargeValue]);
+    cb.setSize(84, 84).setInteractive({ useHandCursor: true });
+    cb.on('pointerdown', () => this.useSpecial());
+    this.chargeBtn = cb;
+    this.updateChargeUi();
+
+    // 중간보스 체력바 (화면 위쪽)
+    this.bossBar = this.add.container(0, 0).setDepth(55).setVisible(false);
+    this.bossBarGfx = this.add.graphics();
+    this.bossBarName = this.add.text(20, 102, '', { fontFamily: FONT, fontSize: '13px', color: '#ffb3b8', stroke: '#000000', strokeThickness: 3 });
+    this.bossBar.add([this.bossBarGfx, this.bossBarName]);
+
+    this.comboText = txt(this, W / 2, 168, '', 30, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(45).setAlpha(0);
   }
 
   updateLifeUi() {
@@ -1137,9 +1227,13 @@ class GameScene extends Phaser.Scene {
         this.updatePlayer(dt);
         this.updateFiring(dt);
         this.spawnDirector(dt);               // 격추된 동안엔 새 적을 보내지 않음
+        this.updateMidBossTimer(dt);
+        this.addCharge(CHARGE.passive * dt);
       }
       this.updateCombo(dt);
     }
+    this.updateSpecial(dt);
+    this.updateBossBar();
     if (this.bombT > 0) {                     // 폭탄 지속 중엔 새로 쏜 탄도 지운다
       this.bombT -= dt;
       this.clearBullets(0, 0, Infinity, false);
@@ -1262,7 +1356,7 @@ class GameScene extends Phaser.Scene {
     if (!b) return;
     b.setTexture(o.kind === 'pb' ? 'pb' : o.kind);
     b.enableBody(true, x, y, true, true);
-    b.setDepth(8);
+    b.setDepth(8).setScale(o.scale || 1);
     b.kind = o.kind;
     b.dmg = o.dmg;
     b.pierce = !!o.pierce;
@@ -1295,7 +1389,7 @@ class GameScene extends Phaser.Scene {
   fireEnemyBullet(x, y, angle, speed, big) {
     const s = this.state;
     if (s.over || s.dead || this.bombT > 0) return;
-    if (this.eBullets.countActive(true) > 160) return;
+    if (this.eBullets.countActive(true) > 220) return;
     const key = big ? 'eb2' : 'eb';
     const b = this.eBullets.get(x, y, key);
     if (!b) return;
@@ -1387,8 +1481,309 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  /* ------------------------- 차지 게이지 -------------------------
+   * 시간이 지나거나 적에게 피해를 주면 자동으로 차오른다.
+   * 100%가 되면 CHARGE 버튼이 빛나고, 누르면 기체별 특수 공격.
+   * ------------------------------------------------------------- */
+  addCharge(v, force) {
+    const s = this.state;
+    if (s.over || s.charge >= 100 || (this.specialActive && !force)) return;
+    const before = s.charge;
+    s.charge = Math.min(100, s.charge + v);
+    if (Math.floor(before) !== Math.floor(s.charge)) this.updateChargeUi();
+    if (s.charge >= 100) {
+      Sound.tone(880, 0.12, 'square', 0.05, 1320);
+      Haptics.vibrate(30);
+    }
+  }
+
+  updateChargeUi() {
+    const g = this.chargeGfx, v = this.state.charge, full = v >= 100;
+    g.clear();
+    g.fillStyle(0x000000, 0.35); g.fillCircle(0, 4, 38);
+    g.fillStyle(full ? 0xff9f1c : 0x1d3557, 0.95); g.fillCircle(0, 0, 36);
+    g.lineStyle(5, 0x0b1a2e, 0.9); g.strokeCircle(0, 0, 31);
+    if (v > 0) {
+      g.lineStyle(5, full ? 0xfff1b8 : 0x5fd3ff, 1);
+      g.beginPath();
+      g.arc(0, 0, 31, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (v / 100), false);
+      g.strokePath();
+    }
+    this.chargeValue.setText(full ? 'GO!' : Math.floor(v) + '%').setColor(full ? '#3a1d00' : '#ffffff');
+    this.chargeLabel.setColor(full ? '#3a1d00' : '#cfe3ff');
+  }
+
+  useSpecial() {
+    const s = this.state;
+    if (s.over || s.dead || s.frozen || this.specialActive || s.charge < 100) return;
+    if (!this.scene.isActive()) return;
+    s.charge = 0;
+    this.updateChargeUi();
+    this.chargeBtn.setScale(1);
+    this.specialActive = true;
+    Sound.unlock();
+    Sound.tone(300, 0.5, 'sawtooth', 0.06, 1200);
+    Haptics.vibrate(120);
+    const p = this.player, id = this.plane.id;
+    const cut = txt(this, GAME_W / 2, GAME_H / 2 - 120, id === 'RAPTOR-X' ? 'MISSILE STORM' : id === 'PHANTOM-Z' ? 'HYPER BEAM'
+      : id === 'THUNDER-A' ? 'SQUADRON CALL' : 'NAPALM BLAST', 30, '#fff1b8', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(46);
+    this.tweens.add({ targets: cut, alpha: 0, y: cut.y - 30, delay: 500, duration: 400, onComplete: () => cut.destroy() });
+
+    if (id === 'RAPTOR-X') {                 // 유도미사일 14발 일제 사격
+      for (let i = 0; i < 14; i++) {
+        this.time.delayedCall(i * 35, () => {
+          if (this.state.dead || this.state.over) return;
+          const a = -Math.PI + (i + 0.5) * (Math.PI / 14);
+          this.firePlayerBullet(this.player.x, this.player.y - 6, { kind: 'missile', vx: Math.cos(a) * 280, vy: Math.sin(a) * 280, dmg: 4, scale: 1.3 });
+        });
+      }
+      this.time.delayedCall(800, () => { this.specialActive = false; });
+    } else if (id === 'PHANTOM-Z') {         // 거대 관통 빔
+      this.beamT = 1.7;
+      if (!this.beamGfx) this.beamGfx = this.add.graphics().setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
+      Sound.noise(1.6, 0.12, 3000);
+    } else if (id === 'THUNDER-A') {         // 지원 편대 3대
+      this.wingT = 7;
+      this.wingmen = [[-52, 18], [52, 18], [0, 52]].map(([ox, oy], i) => {
+        const w = this.add.image(p.x + ox, GAME_H + 60 + i * 30, 'plane_thunder').setScale(0.62).setDepth(10);
+        w.ox = ox; w.oy = oy; w.fireT = i * 0.04;
+        return w;
+      });
+    } else {                                 // 거대 화염탄
+      this.fireball = this.add.image(p.x, p.y - 34, 'shell').setScale(3.4).setDepth(12);
+      this.tweens.add({ targets: this.fireball, angle: 360, duration: 600, repeat: -1 });
+    }
+  }
+
+  updateSpecial(dt) {
+    const p = this.player, s = this.state;
+    // 게이지가 가득 차면 버튼이 두근두근
+    if (s.charge >= 100 && !s.over) this.chargeBtn.setScale(1 + Math.sin(s.elapsed * 10) * 0.07);
+
+    // PHANTOM-Z 빔
+    if (this.beamT > 0 && this.beamGfx) {
+      this.beamT -= dt;
+      const g = this.beamGfx;
+      g.clear();
+      if (this.beamT <= 0 || s.dead || s.over) {
+        this.beamT = 0;
+        this.specialActive = false;
+      } else {
+        const top = 0, bottom = p.y - 28, w = 40 + Math.random() * 10;
+        g.fillStyle(0x5fd3ff, 0.35); g.fillRect(p.x - w / 2 - 10, top, w + 20, bottom - top);
+        g.fillStyle(0x9feaff, 0.6); g.fillRect(p.x - w / 2, top, w, bottom - top);
+        g.fillStyle(0xffffff, 0.95); g.fillRect(p.x - 7, top, 14, bottom - top);
+        g.fillStyle(0xffffff, 0.8); g.fillCircle(p.x, bottom, 16);
+        this.enemies.getChildren().slice().forEach((e) => {
+          if (!e.active || e.y > bottom || e.y < -40) return;
+          if (Math.abs(e.x - p.x) < w / 2 + e.displayWidth * 0.35) this.damageEnemy(e, 36 * dt);
+        });
+        this.eBullets.children.each((b) => {
+          if (b.active && b.y < bottom && Math.abs(b.x - p.x) < w / 2 + 6) b.disableBody(true, true);
+        });
+        if (Math.random() < 0.5) this.fxHit.explode(2, p.x + rand(-w / 2, w / 2), rand(top, bottom));
+      }
+    }
+
+    // THUNDER-A 지원 편대
+    if (this.wingmen.length) {
+      this.wingT -= dt;
+      const leaving = this.wingT <= 0 || s.over;
+      this.wingmen.forEach((w) => {
+        if (leaving) { w.y -= 520 * dt; return; }
+        const tx = clamp(p.x + w.ox, 20, GAME_W - 20), ty = p.y + w.oy;
+        w.x += (tx - w.x) * Math.min(1, dt * 8);
+        w.y += (ty - w.y) * Math.min(1, dt * 8);
+        w.fireT -= dt;
+        if (w.fireT <= 0 && !s.dead) {
+          w.fireT = 0.12;
+          this.firePlayerBullet(w.x, w.y - 16, { kind: 'pb', vy: -920, dmg: 1 });
+        }
+      });
+      if (leaving && this.wingmen.every((w) => w.y < -60)) {
+        this.wingmen.forEach((w) => w.destroy());
+        this.wingmen = [];
+        this.specialActive = false;
+      }
+    }
+
+    // BLAZE-F 화염탄
+    if (this.fireball) {
+      const f = this.fireball;
+      f.y -= 460 * dt;
+      this.fxFire.explode(1, f.x + rand(-8, 8), f.y + 18);
+      const hit = this.enemies.getChildren().some((e) => e.active && e.y > 0 &&
+        Phaser.Math.Distance.Between(f.x, f.y, e.x, e.y) < 30 + e.displayWidth * 0.4);
+      if (hit || f.y < 150) this.detonateFireball();
+    }
+  }
+
+  detonateFireball() {
+    const f = this.fireball, x = f.x, y = f.y;
+    this.fireball = null;
+    f.destroy();
+    this.explode(x, y, 2);
+    const ring = this.add.circle(x, y, 20).setStrokeStyle(10, 0xffb347, 0.9).setDepth(16);
+    this.tweens.add({ targets: ring, scale: 9, alpha: 0, duration: 450, onComplete: () => ring.destroy() });
+    for (let i = 0; i < 6; i++) this.time.delayedCall(i * 60, () => this.explode(x + rand(-110, 110), y + rand(-90, 90), 1, true));
+    this.cameras.main.shake(300, 0.012);
+    Haptics.vibrate([0, 160, 50, 100]);
+    this.clearBullets(x, y, 200, true);
+    this.time.delayedCall(80, () => {
+      this.enemies.getChildren().slice().forEach((e) => {
+        if (e.active && Phaser.Math.Distance.Between(x, y, e.x, e.y) < 175) this.damageEnemy(e, 30);
+      });
+      this.specialActive = false;
+    });
+  }
+
+  /* ------------------------- 중간보스 -------------------------
+   * 약 40초마다 WARNING 경고 → 중간보스 등장. 체력이 절반 아래로
+   * 떨어지면 공격이 거세진다. 격파 보상: 폭탄 +1, 차지 +50%.
+   * ----------------------------------------------------------- */
+  updateMidBossTimer(dt) {
+    if (this.midBoss || this.warningOn) return;
+    this.midT -= dt;
+    if (this.midT <= 0) this.startWarning();
+  }
+
+  startWarning() {
+    const W = GAME_W, H = GAME_H;
+    this.warningOn = true;
+    const kind = MIDBOSS_ORDER[this.midCycle % MIDBOSS_ORDER.length];
+    const band = this.add.rectangle(0, H / 2 - 70, W, 110, 0xb00020, 0.35).setOrigin(0, 0.5).setDepth(44);
+    const t1 = txt(this, W / 2, H / 2 - 88, 'WARNING', 46, '#ff3b4e', { stroke: '#2a0008', strokeThickness: 7 }).setDepth(45);
+    const t2 = txt(this, W / 2, H / 2 - 42, '중간보스 접근 · ' + MIDBOSS[kind].name, 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(45);
+    this.tweens.add({ targets: [band, t1], alpha: 0.25, duration: 260, yoyo: true, repeat: 3 });
+    for (let i = 0; i < 3; i++) this.time.delayedCall(i * 600, () => Sound.tone(520, 0.45, 'sawtooth', 0.06, 260));
+    Haptics.vibrate([90, 90, 90, 90, 90]);
+    this.time.delayedCall(2200, () => {
+      band.destroy(); t1.destroy(); t2.destroy();
+      this.warningOn = false;
+      if (!this.state.over) this.spawnMidBoss(kind);
+    });
+  }
+
+  spawnMidBoss(kind) {
+    const def = MIDBOSS[kind];
+    this.midCycle++;
+    const k = 1 + (this.midCycle - 1) * 0.35;
+    const e = this.enemies.create(GAME_W / 2, -70, def.key);
+    e.setDepth(4);
+    e.body.moves = false;
+    if (def.size) e.body.setSize(def.size[0], def.size[1]);
+    else e.body.setCircle(def.radius, e.width / 2 - def.radius, e.height / 2 - def.radius);
+    Object.assign(e, {
+      etype: 'mboss', kind, name: def.name,
+      hp: Math.round(def.hp * k), maxHp: Math.round(def.hp * k), score: Math.round(def.score * k),
+      t: 0, entered: false, mode: 'enter', targetY: def.y, maxLife: 80,
+      cdA: 1.2, cdB: 2.2, cdC: 0, spiralLeft: 0, spiralAng: 0, dest: null, destT: 0, burst: 0, burstCd: 0
+    });
+    if (kind === 'gunship') e.rotor = this.add.image(e.x, e.y, 'rotor').setScale(1.9).setDepth(6);
+    this.midBoss = e;
+    this.bossBarName.setText('중간보스 · ' + def.name + (this.midCycle > 3 ? '  Lv.' + Math.ceil(this.midCycle / 3) : ''));
+    this.bossBar.setVisible(true);
+  }
+
+  updateMidBoss(e, dt) {
+    const W = GAME_W;
+    const ph2 = e.hp < e.maxHp * 0.5;     // 체력 절반 이하: 2단계
+    if (e.mode === 'enter') {
+      e.y += Math.max(50, (e.targetY - e.y) * 2) * dt;
+      if (e.y >= e.targetY - 2) e.mode = 'fight';
+      return;
+    }
+    if (e.mode === 'leave') { e.y -= 90 * dt; return; }
+    if (e.t > 52) { e.mode = 'leave'; return; }   // 너무 오래 끌면 퇴장
+
+    // 이동
+    if (e.kind === 'ace') {
+      if (!e.dest || e.destT <= 0) {
+        e.dest = { x: rand(60, W - 60), y: rand(110, 330) };
+        e.destT = ph2 ? 1.1 : 1.6;
+        e.burst = ph2 ? 8 : 6;
+        e.burstCd = 0.35;
+      }
+      e.destT -= dt;
+      const ax = (e.dest.x - e.x) * Math.min(1, dt * 3.5);
+      e.x += ax;
+      e.y += (e.dest.y - e.y) * Math.min(1, dt * 3.5);
+      e.rotation += (clamp(ax * 0.25, -0.4, 0.4) - e.rotation) * 0.2;
+    } else {
+      const amp = W / 2 - (e.kind === 'fortress' ? 110 : 80);
+      e.x = W / 2 + Math.sin(e.t * (e.kind === 'fortress' ? 0.5 : 0.8)) * amp;
+      e.y = e.targetY + Math.sin(e.t * 1.3) * 8;
+    }
+
+    // 공격
+    if (e.kind === 'gunship') {
+      e.cdA -= dt;
+      if (e.cdA <= 0) { e.cdA = ph2 ? 1.2 : 1.7; this.fireFanAtPlayer(e, ph2 ? 7 : 5, 0.17, 210, false); }
+      e.cdB -= dt;
+      if (e.cdB <= 0) { e.cdB = ph2 ? 2.4 : 3.2; e.spiralLeft = ph2 ? 28 : 18; }
+      if (e.spiralLeft > 0) {
+        e.cdC -= dt;
+        if (e.cdC <= 0) {
+          e.cdC = 0.05; e.spiralLeft--; e.spiralAng += 0.35;
+          this.fireEnemyBullet(e.x, e.y + 24, e.spiralAng, 170, false);
+          if (ph2) this.fireEnemyBullet(e.x, e.y + 24, e.spiralAng + Math.PI, 170, false);
+        }
+      }
+    } else if (e.kind === 'fortress') {
+      e.cdA -= dt;
+      if (e.cdA <= 0) {
+        e.cdA = ph2 ? 1.9 : 2.5;
+        this.fireRing(e.x, e.y + 10, ph2 ? 22 : 18, 115);
+        if (ph2) this.time.delayedCall(260, () => { if (e.active) this.fireRing(e.x, e.y + 10, 22, 140); });
+      }
+      e.cdB -= dt;
+      if (e.cdB <= 0) {
+        e.cdB = ph2 ? 0.7 : 1.0;
+        [-70, 70].forEach((ox) => this.fireFanAtPlayer({ x: e.x + ox, y: e.y }, 1, 0, 230, true));
+      }
+    } else if (e.burst > 0) {
+      e.burstCd -= dt;
+      if (e.burstCd <= 0) {
+        e.burstCd = 0.08; e.burst--;
+        this.fireFanAtPlayer(e, ph2 ? 3 : 1, 0.2, 270, false);
+      }
+    }
+  }
+
+  endMidBoss(killed) {
+    this.midBoss = null;
+    this.bossBar.setVisible(false);
+    this.midT = 40;
+    if (!killed || this.state.over) return;
+    const s = this.state;
+    s.bombs = Math.min(s.bombs + 1, 5);
+    this.updateBombUi();
+    this.addCharge(50, true);
+    const t = txt(this, GAME_W / 2, GAME_H / 2 - 40, 'MID BOSS DOWN!\nBOMB +1 · CHARGE +50%', 22, '#ffe066',
+      { stroke: '#3a1d00', strokeThickness: 5, align: 'center' }).setDepth(46);
+    this.tweens.add({ targets: t, alpha: 0, y: t.y - 40, delay: 1400, duration: 500, onComplete: () => t.destroy() });
+  }
+
+  bossExplosion(e) {
+    const x = e.x, y = e.y, w = e.displayWidth * 0.4, h = e.displayHeight * 0.35;
+    for (let i = 0; i < 8; i++) {
+      this.time.delayedCall(i * 85, () => this.explode(x + rand(-w, w), y + rand(-h, h), 1, i % 2 === 1));
+    }
+    this.time.delayedCall(720, () => { this.explode(x, y, 2); this.explode(x + 20, y - 15, 2, true); });
+  }
+
+  updateBossBar() {
+    const e = this.midBoss;
+    if (!e || !e.active) return;
+    const g = this.bossBarGfx, W = GAME_W;
+    g.clear();
+    g.fillStyle(0x000000, 0.6); g.fillRoundedRect(16, 120, W - 32, 10, 4);
+    g.fillStyle(e.hp < e.maxHp * 0.5 ? 0xff3b4e : 0xff8a3d, 1);
+    g.fillRoundedRect(18, 122, (W - 36) * clamp(e.hp / e.maxHp, 0, 1), 6, 3);
+  }
+
   /* ------------------------- 난이도 ------------------------- */
-  difficulty() { return Math.min(1 + this.state.elapsed / 70, 3); }
+  difficulty() { return Math.min(1 + this.state.elapsed / 60, 3.5); }
   bulletMul() { return 1 + Math.min(this.state.elapsed / 200, 0.35); }
 
   /* ------------------------- 적 등장 ------------------------- */
@@ -1401,6 +1796,11 @@ class GameScene extends Phaser.Scene {
     const bombers = alive.filter((e) => e.etype === 'bomber').length;
     const helis = alive.filter((e) => e.etype === 'heli').length;
     const r = Math.random();
+    if (this.midBoss || this.warningOn) {     // 중간보스전: 잡몹은 가끔 전투기만
+      this.spawnT *= 1.8;
+      if (r < 0.6) this.spawnFighterWave();
+      return;
+    }
     if (t > 35 && bombers === 0 && r < 0.2) { this.spawnBomber(); this.spawnT += 2.5; }
     else if (t > 12 && helis < 1 + Math.floor(d) && r < 0.5) this.spawnHeli();
     else this.spawnFighterWave();
@@ -1479,6 +1879,7 @@ class GameScene extends Phaser.Scene {
       e.t += dt;
       if (e.etype === 'fighter') this.updateFighter(e, dt);
       else if (e.etype === 'heli') this.updateHeli(e, dt);
+      else if (e.etype === 'mboss') this.updateMidBoss(e, dt);
       else this.updateBomber(e, dt);
 
       if (e.rotor) { e.rotor.setPosition(e.x, e.y + 6); e.rotor.rotation += dt * 28; }
@@ -1493,7 +1894,7 @@ class GameScene extends Phaser.Scene {
       if (e.x > -10 && e.x < W + 10 && e.y > -10 && e.y < H + 10) e.entered = true;
       const m = 90;
       const gone = e.entered && (e.y > H + m || e.y < -m - 60 || e.x < -m || e.x > W + m);
-      if (gone || e.t > 40) this.removeEnemy(e);
+      if (gone || e.t > (e.maxLife || 40)) this.removeEnemy(e);
     }
   }
 
@@ -1586,6 +1987,7 @@ class GameScene extends Phaser.Scene {
   damageEnemy(e, dmg) {
     if (!e.active) return;
     e.hp -= dmg;
+    this.addCharge(Math.min(dmg, e.hp + dmg) * CHARGE.perDamage);
     if (e.hp <= 0) { this.killEnemy(e); return; }
     e.setTintFill(0xffffff);
     this.time.delayedCall(40, () => { if (e.active) e.clearTint(); });
@@ -1603,7 +2005,11 @@ class GameScene extends Phaser.Scene {
     if (s.combo >= 3) this.showCombo(s.combo);
     s.kills++;
 
-    if (e.etype === 'bomber') {
+    if (e.etype === 'mboss') {
+      this.bossExplosion(e);
+      Haptics.vibrate([150, 60, 150, 60, 450]);
+      this.endMidBoss(true);
+    } else if (e.etype === 'bomber') {
       this.bigExplosion(e.x, e.y);
       Haptics.vibrate([120, 60, 120, 60, 320]);   // 보스급 격파 진동
     } else {
@@ -1618,6 +2024,7 @@ class GameScene extends Phaser.Scene {
   }
 
   removeEnemy(e) {
+    if (e.etype === 'mboss' && this.midBoss === e) this.endMidBoss(false);   // 격파 못 하고 도망감
     if (e.rotor) { e.rotor.destroy(); e.rotor = null; }
     if (e.hpBar) { e.hpBar.destroy(); e.hpBar = null; }
     e.destroy();
@@ -1699,6 +2106,7 @@ class GameScene extends Phaser.Scene {
     this.flame.setVisible(false);
     this.muzzle.setVisible(false);
     this.shield.setVisible(false);
+    this.beamT = 0;
     this.drag = null;
   }
 
@@ -1803,6 +2211,8 @@ class GameScene extends Phaser.Scene {
     this.hidePlayer();
     this.pauseBtn.setVisible(false).disableInteractive();
     this.bombBtn.setVisible(false).disableInteractive();
+    this.chargeBtn.setVisible(false).disableInteractive();
+    this.bossBar.setVisible(false);
 
     const isNew = s.score > s.best;
     if (isNew) Store.set('best_' + s.mode, s.score);
