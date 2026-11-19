@@ -452,6 +452,80 @@ function buildSongs() {
     ev.push([16, 'timp', midiOf('D2'), 8, 1]);
     S.over = { bpm: 76, len: 32, loop: false, ev };
   }
+  /* ===== 군대 힙합 세트 ===== */
+  // 하이햇 롤: 한 스텝 안을 n등분해서 촘촘히 (ev의 6번째 값 = 스텝 안 위치 0~1)
+  const roll = (ev, st, n, vel) => { for (let k = 0; k < n; k++) ev.push([st, 'hat', 0, 1, vel, k / n]); };
+  // ── 메뉴: 붐뱁 (스윙) ──
+  {
+    const ev = [], prog = ['Dm', 'Dm', 'Bb', 'A', 'Dm', 'Dm', 'Bb', 'A'];
+    prog.forEach((c, b) => {
+      const B = b * 16, r = midiOf(BASS_ROOT[c]) + 12;
+      [0, 7, 10].forEach((st) => ev.push([B + st, 'kick', 0, 1, st ? 0.8 : 1]));
+      [4, 12].forEach((st) => { ev.push([B + st, 'clap', 0, 1, 1]); ev.push([B + st, 'snare', 0, 1, 0.5]); });
+      for (let i = 0; i < 16; i += 2) ev.push([B + i, 'hat', 0, 1, i % 4 ? 0.45 : 0.75]);
+      if (b % 2 === 1) roll(ev, B + 14, 3, 0.5);
+      ev.push([B, '808', r - 12, 6, 1]); ev.push([B + 7, '808', r - 12, 3, 0.8]); ev.push([B + 10, '808', r - 5, 6, 0.9]);
+      if (b % 2 === 0) [0, 3].forEach((st) => CHORDS[c].forEach((n) => ev.push([B + st, 'horn', midiOf(n + '4'), 2, 0.8])));
+      CHORDS[c].forEach((n) => ev.push([B, 'strings', midiOf(n + '3'), 16, 0.5]));
+    });
+    for (let i = 12; i < 16; i++) { ev.push([3 * 16 + i, 'snare', 0, 1, 0.35 + i * 0.02]); ev.push([7 * 16 + i, 'snare', 0, 1, 0.35 + i * 0.02]); }
+    melody(ev, 'lead', [
+      ['D5', 2], ['-', 2], ['F5', 2], ['E5', 2], ['D5', 4], ['A4', 4],
+      ['Bb4', 2], ['-', 2], ['D5', 2], ['C5', 2], ['Bb4', 4], ['A4', 4],
+      ['F5', 3], ['E5', 3], ['D5', 2], ['C5', 4], ['Bb4', 4],
+      ['A4', 4], ['C#5', 4], ['E5', 4], ['A5', 4]], 0.7, 64);
+    ev.push([0, 'crash', 0, 8, 0.5]);
+    S.menu_hh = { bpm: 88, len: 128, loop: true, swing: 0.2, gain: 0.45, ev };
+  }
+  // ── 스테이지: 트랩 (하프타임) ──
+  {
+    const ev = [], prog = ['Dm', 'Eb', 'Bb', 'A', 'Dm', 'Eb', 'Bb', 'A'];
+    prog.forEach((c, b) => {
+      const B = b * 16, r = midiOf(BASS_ROOT[c]);
+      [0, 10].forEach((st) => ev.push([B + st, 'kick', 0, 1, 1]));
+      if (b % 2) ev.push([B + 3, 'kick', 0, 1, 0.7]);
+      ev.push([B + 8, 'clap', 0, 1, 1]); ev.push([B + 8, 'snare', 0, 1, 0.6]);
+      for (let i = 0; i < 16; i++) {
+        if (i === 6 || (b % 2 && i === 14)) roll(ev, B + i, 3, 0.45);
+        else if (b % 4 === 3 && i >= 12) roll(ev, B + i, 4, 0.4 + (i - 12) * 0.08);
+        else ev.push([B + i, 'hat', 0, 1, i % 4 === 0 ? 0.7 : 0.4]);
+      }
+      if (b % 2 === 0) ev.push([B + 2, 'ohat', 0, 1, 0.5]);
+      ev.push([B, '808', r, 8, 1]); ev.push([B + 10, '808', r, 4, 0.85]); ev.push([B + 14, '808', r + 3, 2, 0.8]);
+      [0, 3, 6].forEach((st) => CHORDS[c].forEach((n) => ev.push([B + st, 'horn', midiOf(n + '4'), 1, st ? 0.7 : 0.9])));
+      if (b % 4 === 3) [12, 13, 14, 15].forEach((st, k) => ev.push([B + st, 'horn', midiOf(CHORDS[c][k % 3] + '5'), 1, 0.8]));
+    });
+    melody(ev, 'lead', [
+      ['D5', 3], ['Eb5', 3], ['D5', 2], ['A4', 4], ['C5', 4],
+      ['D5', 3], ['F5', 3], ['Eb5', 2], ['D5', 8],
+      ['Bb4', 3], ['C5', 3], ['D5', 2], ['F5', 4], ['Eb5', 4],
+      ['D5', 8], ['C#5', 8],
+      ['D6', 3], ['Eb6', 3], ['D6', 2], ['A5', 4], ['C6', 4],
+      ['D6', 3], ['F6', 3], ['Eb6', 2], ['D6', 8],
+      ['Bb5', 3], ['C6', 3], ['D6', 2], ['F6', 4], ['Eb6', 4],
+      ['D6', 8], ['A5', 8]], 0.6);
+    ev.push([0, 'crash', 0, 8, 0.6]);
+    S.stage_hh = { bpm: 140, len: 128, loop: true, gain: 0.45, ev };
+  }
+  // ── 보스: 다크 트랩 + 사이렌 ──
+  {
+    const ev = [], roots = ['D2', 'Eb2', 'E2', 'F2'];
+    roots.forEach((rn, b) => {
+      const B = b * 16, r = midiOf(rn);
+      [0, 4, 8, 12].forEach((st) => { ev.push([B + st, 'kick', 0, 1, 1]); ev.push([B + st, '808', r, 3, 0.9]); });
+      ev.push([B + 8, 'clap', 0, 1, 1]);
+      for (let i = 0; i < 16; i++) {
+        if (i % 4 === 3) roll(ev, B + i, 3, 0.45);
+        else ev.push([B + i, 'hat', 0, 1, 0.5]);
+        ev.push([B + i, 'snare', 0, 1, b === 3 && i >= 8 ? 0.3 + i * 0.03 : 0.15]);
+      }
+      [0, 2, 3, 6].forEach((st) => { ev.push([B + st, 'horn', r + 24, 1, 0.9]); ev.push([B + st, 'horn', r + 31, 1, 0.7]); });
+      ev.push([B, 'siren', midiOf('A5'), 16, 0.5]);
+    });
+    ev.push([0, 'crash', 0, 8, 0.8]);
+    S.boss_hh = { bpm: 150, len: 64, loop: true, gain: 0.5, ev };
+  }
+
   Object.values(S).forEach((song) => {   // 스텝별로 묶어 두기
     song.at = {};
     song.ev.forEach((e) => (song.at[e[0]] = song.at[e[0]] || []).push(e));
@@ -461,12 +535,22 @@ function buildSongs() {
 
 const Music = {
   on: Store.get('music', true),
+  style: Store.get('musicStyle', 'march'),   // 'march' 행진곡 / 'hiphop' 군대 힙합
   songs: null, cur: null, opts: {}, step: 0, nextTime: 0, timer: null, bus: null, paused: false,
-  label() { return this.on ? '음악 ON' : '음악 OFF'; },
+  label() { return !this.on ? '음악 OFF' : this.style === 'hiphop' ? '음악 힙합' : '음악 행진'; },
+  // 버튼을 누를 때마다 행진곡 → 힙합 → 끄기 순서로
   toggle() {
-    this.on = !this.on;
-    Store.set('music', this.on);
-    if (this.on) { Sound.unlock(); this.kick(); } else this.halt();
+    if (this.on && this.style === 'march') this.style = 'hiphop';
+    else if (this.on) this.on = false;
+    else { this.on = true; this.style = 'march'; }
+    Store.set('music', this.on); Store.set('musicStyle', this.style);
+    this.halt();
+    if (this.on) { Sound.unlock(); this.step = 0; this.kick(); }
+  },
+  songKey() {   // 힙합 스타일이면 같은 장면의 힙합 곡을 사용 (없으면 기본 곡)
+    if (!this.songs || !this.cur) return this.cur;
+    const hh = this.cur + '_hh';
+    return this.style === 'hiphop' && this.songs[hh] ? hh : this.cur;
   },
   // 곡 바꾸기 (같은 곡이면 무시). opts.tr = 조옮김(반음), opts.bpm = 빠르기 추가
   play(name, opts) {
@@ -491,19 +575,24 @@ const Music = {
       const d = this.noise.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
+    const song = this.songs[this.songKey()];   // 곡마다 음량 맞추기 (힙합은 808 때문에 더 큼)
+    if (song) this.bus.gain.setValueAtTime(0.3 * (song.gain || 1), ctx.currentTime);
     this.nextTime = ctx.currentTime + 0.08;
     this.timer = setInterval(() => this.tick(), 25);
   },
   halt() { if (this.timer) clearInterval(this.timer); this.timer = null; },
   pause(p) { this.paused = p; if (p) this.halt(); else this.kick(); },
   tick() {
-    const ctx = Sound.ctx, song = this.songs && this.songs[this.cur];
+    const ctx = Sound.ctx, song = this.songs && this.songs[this.songKey()];
     if (!ctx || !song) { this.halt(); return; }
     const stepDur = 60 / (song.bpm + (this.opts.bpm || 0)) / 4;
     while (this.nextTime < ctx.currentTime + 0.15) {
       if (!song.loop && this.step >= song.len) { this.halt(); this.cur = null; return; }
       const evs = song.at[this.step % song.len];
-      if (evs) evs.forEach((e) => this.voice(e[1], e[2] + (e[1] === 'snare' || e[1] === 'kick' || e[1] === 'hat' || e[1] === 'crash' ? 0 : (this.opts.tr || 0)), e[3] * stepDur, e[4], this.nextTime));
+      const sw = song.swing && this.step % 2 ? song.swing * stepDur : 0;   // 힙합 스윙
+      const DRUM = { snare: 1, kick: 1, hat: 1, ohat: 1, crash: 1, clap: 1 };
+      if (evs) evs.forEach((e) => this.voice(e[1], e[2] + (DRUM[e[1]] ? 0 : (this.opts.tr || 0)), e[3] * stepDur, e[4],
+        this.nextTime + sw + (e[5] || 0) * stepDur));
       this.nextTime += stepDur;
       this.step++;
     }
@@ -520,6 +609,45 @@ const Music = {
     };
     const noiseSrc = () => { const s = ctx.createBufferSource(); s.buffer = this.noise; return s; };
     try {
+      if (inst === '808') {             // 묵직한 808 베이스 (살짝 찌그러뜨림)
+        const o = ctx.createOscillator(), g = ctx.createGain(), sh = ctx.createWaveShaper();
+        const curve = new Float32Array(256);
+        for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.2); }
+        sh.curve = curve;
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f * 2.2, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.05);
+        o.connect(sh); sh.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.4);
+        env(g, 0.004, 0.42 * vel, Math.min(dur, 0.2), dur * 0.9 + 0.2);
+        return;
+      }
+      if (inst === 'clap') {            // 손뼉: 짧은 노이즈 세 번 + 잔향
+        [0, 0.011, 0.022].forEach((off, k) => {
+          const s = noiseSrc(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+          bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 1.1;
+          s.connect(bp); bp.connect(g); g.connect(out); s.start(t + off); s.stop(t + off + (k === 2 ? 0.25 : 0.03));
+          g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(0.32 * vel, t + off + 0.002);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + off + (k === 2 ? 0.2 : 0.025));
+        });
+        return;
+      }
+      if (inst === 'ohat') {
+        const s = noiseSrc(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+        hp.type = 'highpass'; hp.frequency.value = 7000;
+        s.connect(hp); hp.connect(g); g.connect(out); s.start(t); s.stop(t + 0.35);
+        env(g, 0.002, 0.07 * vel, 0.02, 0.25);
+        return;
+      }
+      if (inst === 'siren') {           // 공습 사이렌 (오르내림)
+        const o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        o.type = 'sawtooth'; lp.type = 'lowpass'; lp.frequency.value = 1800;
+        o.frequency.setValueAtTime(f * 0.7, t);
+        o.frequency.linearRampToValueAtTime(f, t + dur * 0.45);
+        o.frequency.linearRampToValueAtTime(f * 0.7, t + dur);
+        o.connect(lp); lp.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.1);
+        env(g, 0.3, 0.035 * vel, dur * 0.8, 0.2);
+        return;
+      }
+      if (inst === 'horn') inst = 'stab';   // 힙합 금관 강타는 밝은 스탭으로
       if (inst === 'brass' || inst === 'lead' || inst === 'stab') {
         const g = ctx.createGain(), lp = ctx.createBiquadFilter();
         lp.type = 'lowpass';
