@@ -40,3 +40,60 @@ html, body {
   text-align: center;
   pointer-events: none;
 }
+
+/* ---------- 랭킹 닉네임 입력창 ---------- */
+#name-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 8, 20, 0.6);
+}
+#name-modal.hidden { display: none; }
+.nm-box {
+  width: min(320px, 86vw);
+  padding: 22px 20px 18px;
+  border-radius: 20px;
+  background: #0f2440;
+  border: 2px solid rgba(95, 168, 255, 0.6);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  color: #e8f1ff;
+  font-family: 'Russo One', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  text-align: center;
+}
+.nm-title { font-size: 26px; letter-spacing: 2px; }
+.nm-score { margin-top: 6px; font-size: 16px; color: #ffd166; white-space: nowrap; }
+#nm-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid #35567e;
+  background: #0b1a2e;
+  color: #ffffff;
+  font-size: 18px;              /* 16px 이상이어야 iPhone이 화면을 확대하지 않음 */
+  font-family: inherit;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#nm-input:focus { border-color: #ffc93c; }
+.nm-msg { min-height: 18px; margin-top: 10px; font-size: 12.5px; color: #9ec9ff; letter-spacing: -0.3px; }
+.nm-row { display: flex; gap: 10px; margin-top: 14px; }
+.nm-btn {
+  flex: 1;
+  padding: 12px 0;
+  border: 0;
+  border-radius: 12px;
+  background: #ffc93c;
+  color: #3a2000;
+  font-size: 18px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nm-btn.nm-sub { background: #24456e; color: #e8f1ff; }
+.nm-btn:active { transform: translateY(2px); }

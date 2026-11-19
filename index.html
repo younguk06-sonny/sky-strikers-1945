@@ -17,8 +17,23 @@
   <div id="game"></div>
   <div id="boot-msg">LOADING…</div>
 
+  <!-- 랭킹 닉네임 입력창 (게임 위에 HTML로 띄움) -->
+  <div id="name-modal" class="hidden">
+    <div class="nm-box">
+      <div class="nm-title">RANKING</div>
+      <div class="nm-score" id="nm-score"></div>
+      <input id="nm-input" type="text" maxlength="12" placeholder="닉네임 (최대 12자)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="nm-msg" id="nm-msg"></div>
+      <div class="nm-row">
+        <button id="nm-cancel" class="nm-btn nm-sub" type="button">취소</button>
+        <button id="nm-ok" class="nm-btn" type="button">등록</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Phaser 3 게임 엔진 (CDN). 오프라인에서 쓰려면 phaser.min.js를 받아 같은 폴더에 두고 src만 바꾸면 됩니다. -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+  <script src="config.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

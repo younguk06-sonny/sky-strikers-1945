@@ -1,10 +1,11 @@
 'use strict';
 /* =====================================================================
- * SKY STRIKERS 1945 — 1차 버전
+ * SKY STRIKERS 1945 — 1.1 버전
  * ---------------------------------------------------------------------
  * - Phaser 3 기반 세로 스크롤 슈팅 (기준 해상도 390×844, 화면 비율 유지)
  * - 전투기·적·탄·배경은 전부 Canvas(Graphics)로 직접 그림 → 외부 이미지 불필요
  * - 효과음은 WebAudio로 즉석 합성 → 소리가 막혀 있어도 게임은 그대로 진행
+ * - 1.1 추가: 폭탄, 진동 피드백, 오락실 모드(목숨·폭탄 제한·이어하기), 온라인 랭킹
  * - 장면 구성: Boot(그래픽 생성) → Menu(메인) → Game(플레이) + Pause(일시정지)
  * ===================================================================== */
 
@@ -24,6 +25,16 @@ const randInt = Phaser.Math.Between;
 const clamp = Phaser.Math.Clamp;
 
 /* ---------------------------------------------------------------------
+ * 모드 규칙
+ * ------------------------------------------------------------------- */
+const MODES = {
+  normal: { label: '일반 모드',   desc: '하트 3개 · 폭탄 3개' },
+  arcade: { label: '오락실 모드', desc: '목숨 3 · 목숨마다 폭탄 2 · 이어하기 3회' }
+};
+const ARCADE = { lives: 3, bombsPerLife: 2, credits: 3, continueSec: 10 };
+const NORMAL = { hp: 3, bombs: 3 };
+
+/* ---------------------------------------------------------------------
  * 저장소: localStorage가 막힌 환경(시크릿 모드 등)에서도 오류 없이 동작
  * ------------------------------------------------------------------- */
 const Store = {
@@ -38,19 +49,160 @@ const Store = {
   }
 };
 
+const getMode = () => (Store.get('mode', 'normal') === 'arcade' ? 'arcade' : 'normal');
+const getBest = (mode) => Store.get('best_' + mode, mode === 'normal' ? Store.get('best', 0) : 0);
+
 /* ---------------------------------------------------------------------
- * 랭킹: 지금은 기기 안(localStorage)에만 기록.
- * 나중에 Firebase/Supabase를 붙일 때는 submit()과 top()의 내부만 바꾸면 된다.
+ * 진동: 안드로이드 크롬·삼성 인터넷 등에서 동작, iPhone(Safari)은 미지원
  * ------------------------------------------------------------------- */
-const Ranking = {
-  submit(score, plane) {
-    const runs = Store.get('runs', []);
-    runs.push({ score, plane, at: Date.now() });
-    runs.sort((a, b) => b.score - a.score);
-    Store.set('runs', runs.slice(0, 10));
-    // TODO(온라인 랭킹): 여기서 서버에 { name, score, plane } 전송
+const Haptics = {
+  supported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+  on: Store.get('vibe', true),
+  vibrate(pattern) {
+    if (!this.on || !this.supported) return;
+    try { navigator.vibrate(pattern); } catch (e) { /* 막힌 환경은 무시 */ }
   },
-  top() { return Store.get('runs', []); }
+  toggle() {
+    if (!this.supported) return;
+    this.on = !this.on;
+    Store.set('vibe', this.on);
+    if (this.on) this.vibrate(40);
+  },
+  label() {
+    if (!this.supported) return '진동 미지원';
+    return this.on ? '진동 ON' : '진동 OFF';
+  }
+};
+
+/* ---------------------------------------------------------------------
+ * 온라인 랭킹 (Supabase REST API, 라이브러리 없이 fetch로 호출)
+ * config.js에 키가 없거나 연결이 안 되면 기기 안 기록으로 대신 보여준다.
+ * ------------------------------------------------------------------- */
+const CFG = window.SS_CONFIG || {};
+
+function dedupeByNick(rows, limit) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const k = String(r.nickname || '').toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+const Ranking = {
+  LIMIT: 15,
+  online() { return !!(CFG.supabaseUrl && CFG.supabaseKey); },
+  base() { return String(CFG.supabaseUrl).replace(/\/+$/, '') + '/rest/v1/scores'; },
+  headers(extra) {
+    return Object.assign({
+      apikey: CFG.supabaseKey,
+      Authorization: 'Bearer ' + CFG.supabaseKey,
+      'Content-Type': 'application/json'
+    }, extra || {});
+  },
+  async request(url, opt) {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 7000) : null;
+    try {
+      return await fetch(url, Object.assign({}, opt, ctrl ? { signal: ctrl.signal } : {}));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  },
+  saveLocal(rec) {
+    const key = 'runs_' + rec.mode;
+    const list = Store.get(key, []);
+    list.push(Object.assign({ created_at: new Date().toISOString() }, rec));
+    list.sort((a, b) => b.score - a.score);
+    Store.set(key, list.slice(0, 40));
+  },
+  localTop(mode) { return dedupeByNick(Store.get('runs_' + mode, []), this.LIMIT); },
+
+  // 점수 등록: 항상 기기에 저장 + (설정돼 있으면) 서버로 전송
+  async submit(rec) {
+    const row = {
+      nickname: rec.nickname,
+      score: Math.floor(rec.score),
+      mode: rec.mode,
+      plane: rec.plane,
+      continues: rec.continues | 0
+    };
+    this.saveLocal(row);
+    if (!this.online()) return { ok: true, online: false };
+    try {
+      const r = await this.request(this.base(), {
+        method: 'POST',
+        headers: this.headers({ Prefer: 'return=minimal' }),
+        body: JSON.stringify(row)
+      });
+      return { ok: r.ok, online: true };
+    } catch (e) {
+      return { ok: false, online: true };
+    }
+  },
+
+  // 상위 기록: 닉네임마다 최고 점수 1개만
+  async top(mode) {
+    if (!this.online()) return { list: this.localTop(mode), source: 'local' };
+    try {
+      const url = this.base() + '?select=nickname,score,continues,created_at&mode=eq.' +
+        encodeURIComponent(mode) + '&order=score.desc&limit=300';
+      const r = await this.request(url, { headers: this.headers() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const rows = await r.json();
+      return { list: dedupeByNick(rows, this.LIMIT), source: 'online' };
+    } catch (e) {
+      return { list: this.localTop(mode), source: 'error' };
+    }
+  }
+};
+
+/* ---------------------------------------------------------------------
+ * 닉네임 입력창 (index.html의 #name-modal 사용)
+ * ------------------------------------------------------------------- */
+const NameModal = {
+  open(subtitle) {
+    return new Promise((resolve) => {
+      const m = document.getElementById('name-modal');
+      if (!m) { resolve(null); return; }
+      const input = document.getElementById('nm-input');
+      const ok = document.getElementById('nm-ok');
+      const cancel = document.getElementById('nm-cancel');
+      const msg = document.getElementById('nm-msg');
+      document.getElementById('nm-score').textContent = subtitle;
+      input.value = Store.get('nick', '');
+      const defaultMsg = Ranking.online()
+        ? '친구들과 함께 보는 온라인 랭킹에 올라가요'
+        : '온라인 랭킹 미연결 — 이 기기에만 저장돼요';
+      msg.textContent = defaultMsg;
+      m.classList.remove('hidden');
+      setTimeout(() => { try { input.focus(); } catch (e) { /* 무시 */ } }, 60);
+
+      const done = (v) => {
+        m.classList.add('hidden');
+        ok.onclick = null; cancel.onclick = null; input.onkeydown = null;
+        try { input.blur(); } catch (e) { /* 무시 */ }
+        resolve(v);
+      };
+      ok.onclick = () => {
+        const v = input.value.replace(/[\u0000-\u001f\u007f<>]/g, '').trim();
+        if (!v) { msg.textContent = '닉네임을 입력해 주세요'; return; }
+        if (v.length > 12) { msg.textContent = '12자 이내로 입력해 주세요'; return; }
+        Store.set('nick', v);
+        done(v);
+      };
+      cancel.onclick = () => done(null);
+      input.onkeydown = (e) => {
+        e.stopPropagation();               // 게임 키보드 조작으로 새지 않게
+        if (e.key === 'Enter') ok.onclick();
+        if (e.key === 'Escape') done(null);
+      };
+    });
+  }
 };
 
 /* ---------------------------------------------------------------------
@@ -72,7 +224,7 @@ const Sound = {
         this.master = this.ctx.createGain();
         this.master.gain.value = 0.6;
         this.master.connect(this.ctx.destination);
-        const len = this.ctx.sampleRate;
+        const len = this.ctx.sampleRate * 2;
         this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
         const d = this.noiseBuf.getChannelData(0);
         for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
@@ -131,16 +283,22 @@ const Sound = {
     this.noise(0.25 + size * 0.25, 0.22 + size * 0.12, 2000 - size * 450);
     if (size >= 1) this.tone(130, 0.3 + size * 0.2, 'sine', 0.18, 35);
   },
+  bomb() {
+    this.noise(1.4, 0.45, 2600);
+    this.tone(95, 1.1, 'sine', 0.28, 28);
+  },
   hurt() {
     this.tone(240, 0.28, 'sawtooth', 0.07, 60);
     this.noise(0.2, 0.18, 1400);
   },
+  tick() { this.tone(880, 0.08, 'square', 0.04); },
   click() { this.tone(660, 0.07, 'square', 0.035, 990); },
   toggle() {
     this.on = !this.on;
     Store.set('sound', this.on);
     if (this.on) this.unlock();
-  }
+  },
+  label() { return this.on ? '사운드 ON' : '사운드 OFF'; }
 };
 
 /* ---------------------------------------------------------------------
@@ -153,7 +311,7 @@ const PLANES = [
   { id: 'BLAZE-F',   type: '공격형',   atk: 5, spd: 3, def: 2, desc: '폭발형 특수탄',     unlocked: false }
 ];
 
-// 적 3종: 체력·점수·충돌 반경·폭발 크기
+// 적 3종: 체력·점수·충돌 반경·폭발 크기 (폭격기는 지금 단계의 중간 보스)
 const ENEMY = {
   fighter: { key: 'e_fighter', hp: 1,  score: 100,  radius: 15, boom: 0 },
   heli:    { key: 'e_heli',    hp: 6,  score: 400,  radius: 20, boom: 1 },
@@ -169,13 +327,17 @@ function txt(scene, x, y, str, size, color, extra) {
   }, extra || {})).setOrigin(0.5);
 }
 
+const BTN_STYLES = {
+  primary:   { top: 0xffc93c, bot: 0xc77d00, text: '#3a2000', line: 0xfff1b8 },
+  secondary: { top: 0x24456e, bot: 0x112238, text: '#e8f1ff', line: 0x6fb3ff },
+  accent:    { top: 0x2ec4b6, bot: 0x16776f, text: '#04302b', line: 0xb8fff6 }
+};
+
 // 눌림 효과가 있는 버튼 (손가락을 버튼 위에서 뗐을 때만 실행)
 function makeButton(scene, x, y, w, h, label, onClick, style, fontSize) {
   const c = scene.add.container(x, y);
   const g = scene.add.graphics();
-  const col = style === 'secondary'
-    ? { top: 0x24456e, bot: 0x112238, text: '#e8f1ff', line: 0x6fb3ff }
-    : { top: 0xffc93c, bot: 0xc77d00, text: '#3a2000', line: 0xfff1b8 };
+  const col = BTN_STYLES[style] || BTN_STYLES.primary;
   const r = Math.min(16, h / 2 - 2);
   const draw = (pressed) => {
     g.clear();
@@ -204,6 +366,46 @@ function makeButton(scene, x, y, w, h, label, onClick, style, fontSize) {
   return c;
 }
 
+// 두 칸짜리 선택 스위치 (일반/오락실 모드 등)
+function makeToggle(scene, x, y, w, h, labels, idx, onChange) {
+  const c = scene.add.container(x, y);
+  const g = scene.add.graphics();
+  const texts = labels.map((l, i) => txt(scene, -w / 4 + i * (w / 2), 0, l, 16, '#cfe3ff'));
+  const draw = () => {
+    g.clear();
+    g.fillStyle(0x0b1a2e, 0.85); g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.lineStyle(1.5, 0x5fa8ff, 0.6); g.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.fillStyle(0xffc93c, 1); g.fillRoundedRect(-w / 2 + 3 + idx * (w / 2), -h / 2 + 3, w / 2 - 6, h - 6, (h - 6) / 2);
+    texts.forEach((t, i) => t.setColor(i === idx ? '#3a2000' : '#cfe3ff'));
+  };
+  c.add([g].concat(texts));
+  labels.forEach((l, i) => {
+    const z = scene.add.zone(-w / 4 + i * (w / 2), 0, w / 2, h).setInteractive({ useHandCursor: true });
+    z.on('pointerup', () => {
+      if (idx === i) return;
+      idx = i; draw();
+      Sound.unlock(); Sound.click();
+      onChange(i);
+    });
+    c.add(z);
+  });
+  draw();
+  return c;
+}
+
+// 창(오버레이)을 닫을 때 안쪽 버튼의 입력까지 확실히 끈다
+function setInputEnabled(obj, on) {
+  if (obj.input) obj.input.enabled = on;
+  if (obj.list) obj.list.forEach((o) => setInputEnabled(o, on));
+}
+
+function drawPanel(scene, x, y, w, h) {
+  const g = scene.add.graphics();
+  g.fillStyle(0x0f2440, 0.97); g.fillRoundedRect(x, y, w, h, 22);
+  g.lineStyle(2, 0x5fa8ff, 0.6); g.strokeRoundedRect(x, y, w, h, 22);
+  return g;
+}
+
 /* ---------------------------------------------------------------------
  * 그래픽 그리기 함수 (Boot에서 텍스처로 구워 둔다)
  * ------------------------------------------------------------------- */
@@ -211,23 +413,17 @@ function drawPlayer(g, c) {
   const C = Phaser.Display.Color;
   const dark = C.IntegerToColor(c).darken(25).color;
   const light = C.IntegerToColor(c).lighten(18).color;
-  // 주날개
   g.fillStyle(dark, 1); g.fillRoundedRect(2, 28, 52, 12, 5);
   g.fillStyle(c, 1); g.fillRoundedRect(2, 26, 52, 10, 5);
   g.fillStyle(light, 1); g.fillRect(7, 27, 42, 2);
-  // 꼬리날개
   g.fillStyle(dark, 1); g.fillRoundedRect(15, 46, 26, 7, 3);
   g.fillStyle(c, 1); g.fillRoundedRect(15, 45, 26, 5, 3);
-  // 동체
   g.fillStyle(0x8c99a8, 1); g.fillRoundedRect(22, 6, 12, 46, 6);
   g.fillStyle(0xdbe3ec, 1); g.fillRoundedRect(24, 7, 6, 42, 3);
-  // 기수·프로펠러
   g.fillStyle(0xf2c14e, 1); g.fillTriangle(22, 12, 34, 12, 28, 2);
   g.fillStyle(0x1b1b1b, 0.75); g.fillRect(17, 3, 22, 2);
-  // 조종석
   g.fillStyle(0x1d2f45, 1); g.fillEllipse(28, 22, 7, 11);
   g.fillStyle(0x8fd3ff, 1); g.fillEllipse(27, 20, 2.5, 4);
-  // 날개 표식·기관포
   g.fillStyle(0xffffff, 1); g.fillCircle(11, 31, 3.5); g.fillCircle(45, 31, 3.5);
   g.fillStyle(0xe63946, 1); g.fillCircle(11, 31, 1.8); g.fillCircle(45, 31, 1.8);
   g.fillStyle(0x333a44, 1); g.fillRect(16, 21, 2, 6); g.fillRect(38, 21, 2, 6);
@@ -295,7 +491,6 @@ class BootScene extends Phaser.Scene {
       g.generateTexture(key, w, h);
       g.destroy();
     };
-    // 바다 무늬 타일이 이어 붙어도 티가 안 나도록 가장자리는 비워 둔다
     let seed = 11;
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
@@ -361,7 +556,6 @@ class BootScene extends Phaser.Scene {
       g.fillCircle(152, 64, 22); g.fillCircle(28, 66, 20); g.fillRoundedRect(28, 56, 126, 30, 14);
     });
 
-    // 위아래 어두운 그라데이션 (WebGL/Canvas 어느 쪽이든 보이도록 캔버스 텍스처로)
     const ct = this.textures.createCanvas('vgrad', 4, 256);
     const ctx = ct.getContext();
     const gr = ctx.createLinearGradient(0, 0, 0, 256);
@@ -377,7 +571,7 @@ class BootScene extends Phaser.Scene {
 }
 
 /* =====================================================================
- * Menu: 로고, 움직이는 배경, 시작/기체 선택/사운드
+ * Menu: 로고, 움직이는 배경, 모드 선택, 시작/기체/랭킹/설정
  * ===================================================================== */
 class MenuScene extends Phaser.Scene {
   constructor() { super('Menu'); }
@@ -385,7 +579,7 @@ class MenuScene extends Phaser.Scene {
   create() {
     const W = GAME_W, H = GAME_H;
 
-    // 배경: 바다 + 반짝임 + 구름 + 지나가는 비행기
+    // 배경
     this.sea = this.add.tileSprite(0, 0, W, H, 'sea').setOrigin(0);
     this.glint = this.add.tileSprite(0, 0, W, H, 'glint').setOrigin(0);
     this.island = this.add.image(randInt(60, W - 60), randInt(100, H - 200), 'island').setScale(1.2);
@@ -399,12 +593,11 @@ class MenuScene extends Phaser.Scene {
     this.flyFlame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(4).setScale(1.15);
     this.flyEnemies = [];
     for (let i = 0; i < 3; i++) this.flyEnemies.push(this.add.image(70 + i * 125, -80 - i * 170, 'e_fighter').setDepth(5));
-
     this.add.image(0, 0, 'vgrad').setOrigin(0).setDisplaySize(W, 430).setDepth(8);
-    this.add.image(0, H, 'vgrad').setOrigin(0, 0).setFlipY(true).setDisplaySize(W, 430).setDepth(8).setY(H - 430);
+    this.add.image(0, H - 470, 'vgrad').setOrigin(0).setFlipY(true).setDisplaySize(W, 470).setDepth(8);
 
     // 로고
-    const logo = this.add.container(W / 2, 200).setDepth(10);
+    const logo = this.add.container(W / 2, 190).setDepth(10);
     const sky = txt(this, 0, -52, 'SKY STRIKERS', 40, '#ffffff', { stroke: '#0b2545', strokeThickness: 8 });
     sky.setShadow(0, 4, '#000000', 6, true, true);
     const year = txt(this, 0, 28, '1945', 96, '#ffc93c', { stroke: '#3a1d00', strokeThickness: 10 });
@@ -412,59 +605,66 @@ class MenuScene extends Phaser.Scene {
     grd.addColorStop(0, '#fff4c2'); grd.addColorStop(0.5, '#ffc93c'); grd.addColorStop(1, '#ff7b1c');
     year.setFill(grd);
     year.setShadow(0, 6, '#000000', 8, true, true);
-    const sub = txt(this, 0, 102, '— ARCADE SHOOTER —', 15, '#9ec9ff');
+    const sub = txt(this, 0, 100, '— ARCADE SHOOTER —', 15, '#9ec9ff');
     logo.add([sky, year, sub]);
-    this.tweens.add({ targets: logo, y: 208, duration: 1800, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.tweens.add({ targets: logo, y: 198, duration: 1800, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
     // 최고 점수 · 선택 기체
-    const best = Store.get('best', 0);
+    this.mode = getMode();
     const pill = this.add.graphics().setDepth(10);
-    pill.fillStyle(0x000814, 0.55); pill.fillRoundedRect(W / 2 - 130, 336, 260, 72, 18);
-    pill.lineStyle(1.5, 0xffd166, 0.5); pill.strokeRoundedRect(W / 2 - 130, 336, 260, 72, 18);
-    txt(this, W / 2, 358, 'BEST  ' + fmt(best), 22, '#ffd166').setDepth(11);
-    this.planeLabel = txt(this, W / 2, 388, '기체  ' + Store.get('plane', 'RAPTOR-X'), 14, '#cfe3ff').setDepth(11);
+    pill.fillStyle(0x000814, 0.55); pill.fillRoundedRect(W / 2 - 130, 318, 260, 70, 18);
+    pill.lineStyle(1.5, 0xffd166, 0.5); pill.strokeRoundedRect(W / 2 - 130, 318, 260, 70, 18);
+    this.bestLabel = txt(this, W / 2, 340, '', 22, '#ffd166').setDepth(11);
+    this.planeLabel = txt(this, W / 2, 369, '기체  ' + Store.get('plane', 'RAPTOR-X'), 14, '#cfe3ff').setDepth(11);
+
+    // 모드 선택
+    makeToggle(this, W / 2, 432, 300, 46, [MODES.normal.label, MODES.arcade.label], this.mode === 'arcade' ? 1 : 0, (i) => {
+      this.mode = i === 1 ? 'arcade' : 'normal';
+      Store.set('mode', this.mode);
+      this.refreshModeInfo();
+    }).setDepth(20);
+    this.modeDesc = txt(this, W / 2, 472, '', 13, '#9ec9ff').setDepth(20);
+    this.refreshModeInfo();
 
     // 버튼
-    const start = makeButton(this, W / 2, 560, 260, 72, 'GAME START', () => this.scene.start('Game'), 'primary', 28).setDepth(20);
+    const start = makeButton(this, W / 2, 540, 260, 70, 'GAME START', () => this.scene.start('Game'), 'primary', 28).setDepth(20);
     this.tweens.add({ targets: start, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-    makeButton(this, W / 2, 646, 260, 56, '기체 선택', () => this.hangar.open(), 'secondary', 22).setDepth(20);
-    const sBtn = makeButton(this, W / 2, 716, 260, 50, Sound.on ? 'SOUND  ON' : 'SOUND  OFF', () => {
-      Sound.toggle();
-      sBtn.label.setText(Sound.on ? 'SOUND  ON' : 'SOUND  OFF');
-    }, 'secondary', 18).setDepth(20);
+    makeButton(this, W / 2 - 66, 620, 124, 52, '기체 선택', () => this.openOverlay(this.hangar), 'secondary', 18).setDepth(20);
+    makeButton(this, W / 2 + 66, 620, 124, 52, '랭킹', () => this.openRanking(), 'accent', 20).setDepth(20);
+    const sBtn = makeButton(this, W / 2 - 66, 684, 124, 44, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15).setDepth(20);
+    const vBtn = makeButton(this, W / 2 + 66, 684, 124, 44, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15).setDepth(20);
 
-    txt(this, W / 2, 784, '드래그로 이동 · 자동 발사', 14, '#9ec9ff').setDepth(20);
-    txt(this, W / 2, 806, 'PC: 방향키 / WASD · P 일시정지', 12, '#6f8fb5').setDepth(20);
+    txt(this, W / 2, 760, '드래그로 이동 · 자동 발사 · BOMB 버튼', 13, '#9ec9ff').setDepth(20);
+    txt(this, W / 2, 782, 'PC: 방향키·WASD 이동 · SPACE 폭탄 · P 일시정지', 11.5, '#6f8fb5').setDepth(20);
 
     this.hangar = this.buildHangar();
+    this.ranking = this.buildRanking();
   }
+
+  refreshModeInfo() {
+    this.bestLabel.setText('BEST  ' + fmt(getBest(this.mode)));
+    this.modeDesc.setText(MODES[this.mode].desc);
+  }
+
+  openOverlay(c) { c.setVisible(true); setInputEnabled(c, true); }
+  closeOverlay(c) { c.setVisible(false); setInputEnabled(c, false); }
 
   // 기체 선택 창 (1차 버전은 RAPTOR-X만 사용 가능)
   buildHangar() {
     const W = GAME_W, H = GAME_H;
     const c = this.add.container(0, 0).setDepth(100);
-    // 닫혀 있을 때는 창 안의 버튼이 눌리지 않도록 입력도 함께 끈다
-    const setOpen = (open) => {
-      c.setVisible(open);
-      c.list.forEach((o) => { if (o.input) o.input.enabled = open; });
-    };
-    c.open = () => setOpen(true);
     const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.85).setOrigin(0).setInteractive();
-    const g = this.add.graphics();
-    g.fillStyle(0x0f2440, 0.97); g.fillRoundedRect(20, 90, W - 40, 640, 22);
-    g.lineStyle(2, 0x5fa8ff, 0.6); g.strokeRoundedRect(20, 90, W - 40, 640, 22);
-    c.add([dim, g, txt(this, W / 2, 130, 'HANGAR', 30, '#ffffff'), txt(this, W / 2, 163, '기체 선택', 14, '#9ec9ff')]);
+    c.add([dim, drawPanel(this, 20, 90, W - 40, 640), txt(this, W / 2, 130, 'HANGAR', 30, '#ffffff'), txt(this, W / 2, 163, '기체 선택', 14, '#9ec9ff')]);
 
-    // 선택된 기체 카드
     const p = PLANES[0];
     const card = this.add.graphics();
     card.fillStyle(0x163256, 1); card.fillRoundedRect(40, 190, W - 80, 250, 16);
     card.lineStyle(2.5, 0xffc93c, 0.9); card.strokeRoundedRect(40, 190, W - 80, 250, 16);
     const plane = this.add.image(100, 300, 'player').setScale(1.7);
     this.tweens.add({ targets: plane, y: 292, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-    const name = this.add.text(160, 212, p.id, { fontFamily: FONT, fontSize: '26px', color: '#ffffff' });
-    const type = this.add.text(160, 246, p.type, { fontFamily: FONT, fontSize: '15px', color: '#ffd166' });
-    c.add([card, plane, name, type]);
+    c.add([card, plane,
+      this.add.text(160, 212, p.id, { fontFamily: FONT, fontSize: '26px', color: '#ffffff' }),
+      this.add.text(160, 246, p.type, { fontFamily: FONT, fontSize: '15px', color: '#ffd166' })]);
     const bars = this.add.graphics();
     [['공격력', p.atk], ['속도', p.spd], ['방어력', p.def]].forEach(([label, v], i) => {
       const y = 288 + i * 34;
@@ -477,7 +677,6 @@ class MenuScene extends Phaser.Scene {
     c.add(bars);
     c.add(txt(this, W / 2, 410, p.desc + ' (미사일은 2차 버전)', 14, '#cfe3ff'));
 
-    // 잠긴 기체
     c.add(txt(this, W / 2, 474, '추가 기체 — 2차 버전에서 열려요', 14, '#9ec9ff'));
     PLANES.slice(1).forEach((pl, i) => {
       const cx = W / 2 - 104 + i * 104;
@@ -494,10 +693,71 @@ class MenuScene extends Phaser.Scene {
     c.add(makeButton(this, W / 2, 690, 220, 54, '확인', () => {
       Store.set('plane', p.id);
       this.planeLabel.setText('기체  ' + p.id);
-      setOpen(false);
+      this.closeOverlay(c);
     }, 'primary', 22));
-    setOpen(false);
+    this.closeOverlay(c);
     return c;
+  }
+
+  // 랭킹 창: 모드별 상위 15명 (온라인 → 실패 시 기기 기록)
+  buildRanking() {
+    const W = GAME_W, H = GAME_H;
+    const c = this.add.container(0, 0).setDepth(100);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.85).setOrigin(0).setInteractive();
+    c.add([dim, drawPanel(this, 20, 70, W - 40, 720), txt(this, W / 2, 110, 'RANKING', 30, '#ffffff')]);
+    this.rankMode = this.mode;
+    this.rankTabs = makeToggle(this, W / 2, 160, 300, 42, [MODES.normal.label, MODES.arcade.label], this.rankMode === 'arcade' ? 1 : 0, (i) => {
+      this.rankMode = i === 1 ? 'arcade' : 'normal';
+      this.loadRanking();
+    });
+    c.add(this.rankTabs);
+    this.rankStatus = txt(this, W / 2, 202, '', 12.5, '#9ec9ff');
+    c.add(this.rankStatus);
+
+    this.rankRows = [];
+    for (let i = 0; i < Ranking.LIMIT; i++) {
+      const y = 240 + i * 30;
+      const rk = txt(this, 58, y, '', 16, '#cfe3ff');
+      const nick = this.add.text(84, y, '', { fontFamily: FONT, fontSize: '15px', color: '#ffffff' }).setOrigin(0, 0.5);
+      const sc = this.add.text(334, y, '', { fontFamily: FONT, fontSize: '17px', color: '#ffffff' }).setOrigin(1, 0.5);
+      c.add([rk, nick, sc]);
+      this.rankRows.push({ rk, nick, sc });
+    }
+    c.add(makeButton(this, W / 2, 735, 220, 52, '닫기', () => this.closeOverlay(c), 'primary', 22));
+    this.closeOverlay(c);
+    return c;
+  }
+
+  openRanking() {
+    this.openOverlay(this.ranking);
+    this.loadRanking();
+  }
+
+  async loadRanking() {
+    const mode = this.rankMode;
+    const token = (this.rankToken = (this.rankToken || 0) + 1);
+    this.rankRows.forEach((r) => { r.rk.setText(''); r.nick.setText(''); r.sc.setText(''); });
+    this.rankStatus.setText('불러오는 중…');
+    const res = await Ranking.top(mode);
+    if (token !== this.rankToken || !this.sys || !this.sys.isActive()) return;   // 그사이 탭이 바뀌었거나 화면을 떠남
+    const status = {
+      online: '온라인 랭킹 · 닉네임별 최고 점수',
+      local: '온라인 랭킹 미연결 — 이 기기 기록',
+      error: '온라인 연결 실패 — 이 기기 기록'
+    };
+    this.rankStatus.setText(status[res.source]);
+    if (!res.list.length) { this.rankRows[3].nick.setText('아직 기록이 없어요'); return; }
+    const medal = ['#ffd166', '#dfe7f2', '#e0a274'];
+    res.list.forEach((r, i) => {
+      const row = this.rankRows[i];
+      if (!row) return;
+      let name = String(r.nickname || '');
+      if (name.length > 8) name = name.slice(0, 8) + '…';
+      if (mode === 'arcade' && r.continues > 0) name += ' ·C' + r.continues;   // 이어하기 횟수 표시
+      row.rk.setText(String(i + 1)).setColor(medal[i] || '#cfe3ff');
+      row.nick.setText(name).setColor(i < 3 ? medal[i] : '#ffffff');
+      row.sc.setText(fmt(r.score));
+    });
   }
 
   update(time, delta) {
@@ -529,23 +789,32 @@ class GameScene extends Phaser.Scene {
 
   create() {
     const W = GAME_W, H = GAME_H;
+    const mode = getMode();
 
     // ---- 상태 초기화 (재시작 때마다 새로 만든다) ----
     this.state = {
-      score: 0, hp: 3, maxHp: 3, combo: 0, comboTimer: 0,
-      elapsed: 0, kills: 0, over: false, best: Store.get('best', 0)
+      mode,
+      score: 0, combo: 0, comboTimer: 0, elapsed: 0, kills: 0,
+      hp: NORMAL.hp, maxHp: NORMAL.hp,                         // 일반 모드
+      lives: ARCADE.lives, credits: ARCADE.credits, continues: 0, // 오락실 모드
+      bombs: mode === 'arcade' ? ARCADE.bombsPerLife : NORMAL.bombs,
+      dead: false,     // 오락실 모드에서 격추되어 다시 나오기 전
+      frozen: false,   // 이어하기 카운트다운 중
+      over: false,
+      best: getBest(mode)
     };
     this.fireTimer = 0;
     this.muzzleT = 0;
+    this.bombT = 0;
     this.spawnT = 1.6;
     this.islandT = 3;
     this.cloudT = 1;
     this.invuln = 1.5;
     this.drag = null;
-    this.trash = [];     // 충돌 콜백 안에서 죽은 적은 다음 프레임에 정리
+    this.trash = [];
     this.floatCount = 0;
 
-    // ---- 배경 (다층 스크롤) ----
+    // ---- 배경 ----
     this.sea = this.add.tileSprite(0, 0, W, H, 'sea').setOrigin(0).setDepth(0);
     this.glint = this.add.tileSprite(0, 0, W, H, 'glint').setOrigin(0).setDepth(0.5);
     this.scenery = this.add.group();
@@ -593,12 +862,14 @@ class GameScene extends Phaser.Scene {
     this.input.on('pointerupoutside', this.onPointerUp, this);
     this.keys = null;
     if (this.input.keyboard) {
-      this.keys = this.input.keyboard.addKeys('UP,DOWN,LEFT,RIGHT,W,A,S,D');
+      // 두 번째 인자 false: 키를 가로채지 않아 닉네임 입력창에 타자가 정상 입력됨
+      this.keys = this.input.keyboard.addKeys('UP,DOWN,LEFT,RIGHT,W,A,S,D', false);
       this.input.keyboard.on('keydown-P', () => this.openPause());
       this.input.keyboard.on('keydown-ESC', () => this.openPause());
+      this.input.keyboard.on('keydown-SPACE', () => this.useBomb());
+      this.input.keyboard.on('keydown-B', () => this.useBomb());
     }
 
-    // 앱 전환·화면 꺼짐 시 자동 일시정지
     const onVis = () => { if (document.hidden) this.openPause(); };
     const onResume = () => { this.drag = null; };
     document.addEventListener('visibilitychange', onVis);
@@ -610,24 +881,34 @@ class GameScene extends Phaser.Scene {
 
     this.buildHud();
 
-    const hint = txt(this, W / 2, H - 80, '화면 아무 곳이나 드래그해서 이동', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
-    this.tweens.add({ targets: hint, alpha: 0, delay: 2600, duration: 600, onComplete: () => hint.destroy() });
+    const banner = txt(this, W / 2, H / 2 - 60, mode === 'arcade' ? 'ARCADE MODE' : 'READY', 34, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(40);
+    const hint = txt(this, W / 2, H - 150, '드래그로 이동 · 위급할 땐 BOMB', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
+    this.tweens.add({ targets: [banner, hint], alpha: 0, delay: 2200, duration: 600, onComplete: () => { banner.destroy(); hint.destroy(); } });
   }
 
   /* ------------------------- HUD ------------------------- */
   buildHud() {
-    const W = GAME_W;
+    const W = GAME_W, H = GAME_H, s = this.state;
     this.add.image(0, 0, 'vgrad').setOrigin(0).setDisplaySize(W, 110).setDepth(49);
     this.add.text(16, 12, 'SCORE', { fontFamily: FONT, fontSize: '13px', color: '#9ec9ff' }).setDepth(50);
     this.scoreText = this.add.text(16, 28, '0', {
       fontFamily: FONT, fontSize: '26px', color: '#ffffff', stroke: '#000000', strokeThickness: 3
     }).setDepth(50);
-    this.add.text(16, 62, 'BEST ' + fmt(this.state.best), { fontFamily: FONT, fontSize: '13px', color: '#ffd166' }).setDepth(50);
+    this.add.text(16, 62, 'BEST ' + fmt(s.best), { fontFamily: FONT, fontSize: '13px', color: '#ffd166' }).setDepth(50);
 
-    this.hearts = [];
-    for (let i = 0; i < this.state.maxHp; i++) {
-      this.hearts.push(this.add.image(W - 76 - i * 27, 35, 'heart').setDepth(50));
+    // 일반: 하트 / 오락실: 남은 기체 아이콘 + 크레딧
+    this.lifeIcons = [];
+    const count = s.mode === 'arcade' ? ARCADE.lives : s.maxHp;
+    for (let i = 0; i < count; i++) {
+      const icon = s.mode === 'arcade'
+        ? this.add.image(W - 76 - i * 27, 35, 'player').setScale(0.4)
+        : this.add.image(W - 76 - i * 27, 35, 'heart');
+      this.lifeIcons.push(icon.setDepth(50));
     }
+    if (s.mode === 'arcade') {
+      this.creditText = this.add.text(W - 16, 64, '', { fontFamily: FONT, fontSize: '12px', color: '#9ec9ff' }).setOrigin(1, 0).setDepth(50);
+    }
+    this.updateLifeUi();
 
     // 일시정지 버튼
     const pb = this.add.container(W - 32, 35).setDepth(60);
@@ -640,11 +921,35 @@ class GameScene extends Phaser.Scene {
     pb.on('pointerup', () => { Sound.click(); this.openPause(); });
     this.pauseBtn = pb;
 
+    // 폭탄 버튼 (오른쪽 아래, 누르는 순간 발동)
+    const bb = this.add.container(W - 60, H - 78).setDepth(60).setAlpha(0.9);
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.35); bg.fillCircle(0, 4, 38);
+    bg.fillStyle(0xd62839, 0.95); bg.fillCircle(0, 0, 36);
+    bg.lineStyle(3, 0xffd0d5, 0.8); bg.strokeCircle(0, 0, 33);
+    this.bombCount = txt(this, 0, 9, '', 26, '#ffffff');
+    bb.add([bg, txt(this, 0, -14, 'BOMB', 12, '#ffe3e6'), this.bombCount]);
+    bb.setSize(84, 84).setInteractive({ useHandCursor: true });
+    bb.on('pointerdown', () => this.useBomb());
+    this.bombBtn = bb;
+    this.updateBombUi();
+
     this.comboText = txt(this, W / 2, 132, '', 30, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(45).setAlpha(0);
   }
 
-  updateHearts() {
-    this.hearts.forEach((h, i) => h.setTexture(i < this.state.hp ? 'heart' : 'heart_e'));
+  updateLifeUi() {
+    const s = this.state;
+    if (s.mode === 'arcade') {
+      this.lifeIcons.forEach((ic, i) => ic.setAlpha(i < s.lives ? 1 : 0.18));
+      if (this.creditText) this.creditText.setText('CREDIT ' + s.credits);
+    } else {
+      this.lifeIcons.forEach((h, i) => h.setTexture(i < s.hp ? 'heart' : 'heart_e'));
+    }
+  }
+
+  updateBombUi() {
+    this.bombCount.setText(String(this.state.bombs));
+    this.bombBtn.setAlpha(this.state.bombs > 0 ? 0.9 : 0.35);
   }
 
   addScore(n) {
@@ -672,7 +977,7 @@ class GameScene extends Phaser.Scene {
 
   /* ------------------------- 일시정지 ------------------------- */
   openPause() {
-    if (!this.state || this.state.over) return;
+    if (!this.state || this.state.over || this.state.frozen) return;
     if (!this.scene.isActive() || this.scene.isPaused()) return;
     this.drag = null;
     this.scene.launch('Pause');
@@ -685,19 +990,24 @@ class GameScene extends Phaser.Scene {
    * ----------------------------------------------------------- */
   onPointerDown(p, over) {
     if (over && over.length) return;          // 버튼 위 터치는 이동으로 쓰지 않음
-    if (this.state.over) return;
+    if (this.state.over || this.state.frozen) return;
     this.drag = { id: p.id, px: p.x, py: p.y, sx: this.target.x, sy: this.target.y };
   }
 
   onPointerMove(p) {
+    const s = this.state;
+    // 재출격 후에도 손가락을 떼지 않고 계속 움직이면 바로 이어서 조작
+    if (!this.drag && p.isDown && !s.dead && !s.over && !s.frozen) {
+      this.drag = { id: p.id, px: p.x, py: p.y, sx: this.target.x, sy: this.target.y };
+      return;
+    }
     const d = this.drag;
-    if (!d || p.id !== d.id || this.state.over) return;
+    if (!d || p.id !== d.id || s.over || s.dead) return;
     const SENS = 1.25;
     const rawX = d.sx + (p.x - d.px) * SENS;
     const rawY = d.sy + (p.y - d.py) * SENS;
     this.target.x = rawX; this.target.y = rawY;
     this.clampTarget();
-    // 가장자리에 막혔으면 기준점을 다시 잡아서 반대로 움직일 때 바로 반응하게 함
     if (this.target.x !== rawX) { d.sx = this.target.x; d.px = p.x; }
     if (this.target.y !== rawY) { d.sy = this.target.y; d.py = p.y; }
   }
@@ -714,6 +1024,7 @@ class GameScene extends Phaser.Scene {
   /* ------------------------- 메인 루프 ------------------------- */
   update(time, delta) {
     const dt = Math.min(delta, 50) / 1000;
+    const s = this.state;
 
     if (this.trash.length) {
       this.trash.forEach((e) => this.removeEnemy(e));
@@ -721,19 +1032,27 @@ class GameScene extends Phaser.Scene {
     }
 
     this.scrollBackground(dt);
-    if (!this.state.over) {
-      this.state.elapsed += dt;
-      this.updatePlayer(dt);
-      this.updateFiring(dt);
-      this.spawnDirector(dt);
+    if (s.frozen) return;                     // 이어하기 카운트다운 중엔 전투 정지
+
+    if (!s.over) {
+      s.elapsed += dt;
+      if (!s.dead) {
+        this.updatePlayer(dt);
+        this.updateFiring(dt);
+        this.spawnDirector(dt);               // 격추된 동안엔 새 적을 보내지 않음
+      }
       this.updateCombo(dt);
+    }
+    if (this.bombT > 0) {                     // 폭탄 지속 중엔 새로 쏜 탄도 지운다
+      this.bombT -= dt;
+      this.clearBullets(0, 0, Infinity, false);
     }
     this.updateEnemies(dt);
     this.updateBullets();
   }
 
   scrollBackground(dt) {
-    const W = GAME_W, H = GAME_H;
+    const H = GAME_H;
     this.sea.tilePositionY -= 60 * dt;
     this.glint.tilePositionY -= 85 * dt;
     this.scenery.getChildren().slice().forEach((o) => {
@@ -781,7 +1100,6 @@ class GameScene extends Phaser.Scene {
     p.x += (this.target.x - p.x) * f;
     p.y += (this.target.y - p.y) * f;
 
-    // 좌우 이동 시 살짝 기울기
     const tilt = clamp((p.x - prevX) / Math.max(dt, 0.001) * 0.0006, -0.22, 0.22);
     p.rotation += (tilt - p.rotation) * 0.2;
 
@@ -824,7 +1142,8 @@ class GameScene extends Phaser.Scene {
 
   // 적 탄: 판정 원은 그림보다 작게 잡아 억울한 피격을 줄인다
   fireEnemyBullet(x, y, angle, speed, big) {
-    if (this.state.over) return;
+    const s = this.state;
+    if (s.over || s.dead || this.bombT > 0) return;
     if (this.eBullets.countActive(true) > 160) return;
     const key = big ? 'eb2' : 'eb';
     const b = this.eBullets.get(x, y, key);
@@ -859,6 +1178,48 @@ class GameScene extends Phaser.Scene {
     });
     this.eBullets.children.each((b) => {
       if (b.active && (b.y < -40 || b.y > H + 40 || b.x < -40 || b.x > W + 40)) b.disableBody(true, true);
+    });
+  }
+
+  // 반경 r 안의 적 탄 제거 (r = Infinity면 전부)
+  clearBullets(x, y, r, sparks) {
+    this.eBullets.children.each((b) => {
+      if (!b.active) return;
+      if (r !== Infinity && Phaser.Math.Distance.Between(x, y, b.x, b.y) >= r) return;
+      if (sparks) this.fxHit.explode(2, b.x, b.y);
+      b.disableBody(true, true);
+    });
+  }
+
+  /* ------------------------- 폭탄 -------------------------
+   * 화면의 적 탄을 모두 지우고, 화면 안 적에게 큰 피해.
+   * 발동 중 잠시 무적 + 진동.
+   * ------------------------------------------------------- */
+  useBomb() {
+    const s = this.state;
+    if (s.over || s.dead || s.frozen || s.bombs <= 0 || this.bombT > 0) return;
+    if (!this.scene.isActive()) return;
+    s.bombs--;
+    this.updateBombUi();
+    this.bombT = 1.0;
+    this.invuln = Math.max(this.invuln, 1.4);
+    Sound.unlock(); Sound.bomb();
+    Haptics.vibrate([0, 220, 60, 120]);
+
+    const p = this.player;
+    this.clearBullets(0, 0, Infinity, true);
+    this.cameras.main.flash(260, 255, 236, 190);
+    this.cameras.main.shake(420, 0.012);
+
+    const ring = this.add.circle(p.x, p.y, 12).setStrokeStyle(8, 0xfff1b8, 0.95).setDepth(16);
+    this.tweens.add({ targets: ring, scale: 80, alpha: 0, duration: 700, ease: 'Cubic.out', onComplete: () => ring.destroy() });
+    for (let i = 0; i < 9; i++) {
+      this.time.delayedCall(i * 55, () => this.explode(randInt(30, GAME_W - 30), randInt(120, GAME_H - 220), 0, true));
+    }
+    this.time.delayedCall(150, () => {
+      this.enemies.getChildren().slice().forEach((e) => {
+        if (e.active && e.y > -20 && e.y < GAME_H) this.damageEnemy(e, 20);
+      });
     });
   }
 
@@ -900,7 +1261,6 @@ class GameScene extends Phaser.Scene {
     return e;
   }
 
-  // 전투기 편대 4가지 패턴
   spawnFighterWave() {
     const W = GAME_W, d = this.difficulty();
     const r = Math.random();
@@ -983,7 +1343,6 @@ class GameScene extends Phaser.Scene {
       e.vy += 90 * dt;
       e.rotation = Math.atan2(e.vy, e.vx) - Math.PI / 2;
     }
-    // 화면에 들어온 뒤 잠시 후 한 발 조준 사격
     if (!e.fired && e.y > 0 && e.x > 0 && e.x < GAME_W) {
       e.visT = (e.visT || 0) + dt;
       if (e.visT > e.fireAt) {
@@ -999,7 +1358,7 @@ class GameScene extends Phaser.Scene {
       if (e.y >= e.targetY - 2) { e.mode = 'hover'; e.modeT = 0; }
     } else if (e.mode === 'hover') {
       e.modeT += dt;
-      e.x += clamp(this.player.x - e.x, -60, 60) * 0.5 * dt;   // 천천히 플레이어 쪽으로
+      e.x += clamp(this.player.x - e.x, -60, 60) * 0.5 * dt;
       e.y = e.targetY + Math.sin(e.t * 2) * 4;
       e.fireCd -= dt;
       if (e.fireCd <= 0) {
@@ -1015,7 +1374,7 @@ class GameScene extends Phaser.Scene {
   }
 
   updateBomber(e, dt) {
-    if (e.t > 20) e.y += 70 * dt;                  // 20초 뒤 퇴장
+    if (e.t > 20) e.y += 70 * dt;
     else e.y += (e.y < 170 ? 45 : 10) * dt;
     if (e.y > 40 && e.t < 20) {
       e.ringCd -= dt; e.aimCd -= dt;
@@ -1033,18 +1392,19 @@ class GameScene extends Phaser.Scene {
   }
 
   onPlayerHitBullet(p, b) {
-    if (!b.active || this.invuln > 0 || this.state.over) return;
+    if (!b.active || this.invuln > 0 || this.state.over || this.state.dead) return;
     b.disableBody(true, true);
     this.hurtPlayer();
   }
 
   onPlayerHitEnemy(p, e) {
-    if (!e.active || this.invuln > 0 || this.state.over) return;
+    if (!e.active || this.invuln > 0 || this.state.over || this.state.dead) return;
     this.damageEnemy(e, e.etype === 'fighter' ? 99 : 4);
     this.hurtPlayer();
   }
 
   damageEnemy(e, dmg) {
+    if (!e.active) return;
     e.hp -= dmg;
     if (e.hp <= 0) { this.killEnemy(e); return; }
     e.setTintFill(0xffffff);
@@ -1052,7 +1412,6 @@ class GameScene extends Phaser.Scene {
     Sound.hit();
   }
 
-  // 격추: 콤보 점수 계산 + 폭발 (오브젝트 삭제는 다음 프레임에 안전하게)
   killEnemy(e) {
     const s = this.state;
     s.combo = s.comboTimer > 0 ? s.combo + 1 : 1;
@@ -1064,8 +1423,12 @@ class GameScene extends Phaser.Scene {
     if (s.combo >= 3) this.showCombo(s.combo);
     s.kills++;
 
-    if (e.etype === 'bomber') this.bigExplosion(e.x, e.y);
-    else this.explode(e.x, e.y, ENEMY[e.etype].boom);
+    if (e.etype === 'bomber') {
+      this.bigExplosion(e.x, e.y);
+      Haptics.vibrate([120, 60, 120, 60, 320]);   // 보스급 격파 진동
+    } else {
+      this.explode(e.x, e.y, ENEMY[e.etype].boom);
+    }
 
     e.body.enable = false;
     e.setActive(false).setVisible(false);
@@ -1089,7 +1452,7 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ------------------------- 폭발 이펙트 ------------------------- */
-  explode(x, y, size) {   // size: 0 소형, 1 중형, 2 대형
+  explode(x, y, size, noShake) {   // size: 0 소형, 1 중형, 2 대형
     const n = [10, 22, 42][size];
     this.fxFire.explode(n, x, y);
     this.fxSmoke.explode(Math.ceil(n / 3), x, y);
@@ -1099,7 +1462,7 @@ class GameScene extends Phaser.Scene {
       targets: f, scale: 0.9 + size * 0.9, alpha: 0, duration: 260 + size * 120,
       onComplete: () => f.destroy()
     });
-    if (size >= 1) this.cameras.main.shake(90 + size * 70, 0.003 + size * 0.003);
+    if (size >= 1 && !noShake) this.cameras.main.shake(90 + size * 70, 0.003 + size * 0.003);
     Sound.boom(size);
   }
 
@@ -1110,76 +1473,192 @@ class GameScene extends Phaser.Scene {
     this.time.delayedCall(500, () => this.explode(x, y, 2));
   }
 
-  clearBulletsNear(x, y, r) {
-    this.eBullets.children.each((b) => {
-      if (b.active && Phaser.Math.Distance.Between(x, y, b.x, b.y) < r) {
-        this.fxHit.explode(2, b.x, b.y);
-        b.disableBody(true, true);
-      }
-    });
-  }
-
-  /* ------------------------- 피격 · 게임오버 ------------------------- */
+  /* ------------------------- 피격 ------------------------- */
   hurtPlayer() {
     const s = this.state;
-    s.hp--;
-    this.updateHearts();
     Sound.hurt();
     this.cameras.main.shake(180, 0.012);
-    this.explode(this.player.x, this.player.y, 0);
-    this.clearBulletsNear(this.player.x, this.player.y, 150);   // 연속 피격 방지
+    this.clearBullets(this.player.x, this.player.y, 150, true);
     s.combo = 0; s.comboTimer = 0;
-    if (s.hp <= 0) { this.gameOver(); return; }
-    this.invuln = 1.8;
+
+    if (s.mode === 'normal') {
+      s.hp--;
+      this.updateLifeUi();
+      this.explode(this.player.x, this.player.y, 0);
+      Haptics.vibrate(90);
+      if (s.hp <= 0) { this.gameOver(); return; }
+      this.invuln = 1.8;
+    } else {
+      s.lives--;
+      this.updateLifeUi();
+      this.playerDown();
+    }
   }
 
-  gameOver() {
-    const s = this.state;
-    s.over = true;
-    this.drag = null;
+  hidePlayer() {
     const p = this.player;
-    this.explode(p.x, p.y, 2);
-    this.time.delayedCall(160, () => this.explode(p.x + 16, p.y - 10, 1));
     p.setVisible(false);
     p.body.enable = false;
     this.flame.setVisible(false);
     this.muzzle.setVisible(false);
+    this.drag = null;
+  }
+
+  // 오락실 모드: 한 번 맞으면 기체 1대 격추 → 다시 출격 또는 이어하기
+  playerDown() {
+    const s = this.state, p = this.player;
+    s.dead = true;
+    this.explode(p.x, p.y, 2);
+    this.time.delayedCall(140, () => this.explode(p.x + 14, p.y - 10, 1));
+    Haptics.vibrate([250, 80, 250]);
+    this.hidePlayer();
+    this.time.delayedCall(300, () => this.clearBullets(0, 0, Infinity, true));
+    this.time.delayedCall(1400, () => {
+      if (s.over) return;
+      if (s.lives > 0) this.respawn();
+      else this.showContinue();
+    });
+  }
+
+  respawn() {
+    const s = this.state, p = this.player;
+    s.dead = false;
+    s.bombs = ARCADE.bombsPerLife;           // 새 기체마다 폭탄 보충
+    this.updateBombUi();
+    p.setPosition(GAME_W / 2, GAME_H + 50).setRotation(0).setVisible(true);
+    p.body.enable = true;
+    this.flame.setVisible(true);
+    this.target.x = GAME_W / 2; this.target.y = GAME_H - 170;
+    this.invuln = 2.5;
+    this.fireTimer = 0.4;
+  }
+
+  /* ------------------------- 이어하기 (CONTINUE?) ------------------------- */
+  showContinue() {
+    const s = this.state;
+    if (s.credits <= 0) { this.finishGame(0); return; }
+    s.frozen = true;
+    this.physics.pause();
+    this.pauseBtn.setVisible(false);
+
+    const W = GAME_W, H = GAME_H;
+    const c = this.add.container(0, 0).setDepth(200);
+    c.add([
+      this.add.rectangle(0, 0, W, H, 0x000814, 0.7).setOrigin(0).setInteractive(),
+      drawPanel(this, 40, 250, W - 80, 380),
+      txt(this, W / 2, 300, 'CONTINUE?', 40, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 })
+    ]);
+    let count = ARCADE.continueSec;
+    const num = txt(this, W / 2, 385, String(count), 88, '#ffffff', { stroke: '#000000', strokeThickness: 6 });
+    c.add([num, txt(this, W / 2, 450, '남은 크레딧 ' + s.credits + ' · 점수는 이어져요', 14, '#9ec9ff')]);
+
+    const close = () => { if (this.contTimer) this.contTimer.remove(); this.contTimer = null; c.destroy(); };
+    const yes = makeButton(this, W / 2, 510, 240, 60, '이어하기', () => {
+      close();
+      s.credits--; s.continues++;
+      s.lives = ARCADE.lives;
+      s.frozen = false;
+      this.updateLifeUi();
+      this.physics.resume();
+      this.pauseBtn.setVisible(true);
+      this.clearBullets(0, 0, Infinity, false);
+      this.respawn();
+    }, 'primary', 24);
+    const no = makeButton(this, W / 2, 582, 240, 48, '그만하기', () => {
+      close();
+      this.finishGame(0);
+    }, 'secondary', 18);
+    c.add([yes, no]);
+    yes.disableInteractive(); no.disableInteractive();
+    this.time.delayedCall(400, () => { if (yes.scene) { yes.setInteractive(); no.setInteractive(); } });
+
+    this.contTimer = this.time.addEvent({
+      delay: 1000, repeat: ARCADE.continueSec - 1,
+      callback: () => {
+        count--;
+        num.setText(String(count));
+        num.setScale(1.3);
+        this.tweens.add({ targets: num, scale: 1, duration: 200 });
+        Sound.tick();
+        if (count <= 0) { close(); this.finishGame(0); }
+      }
+    });
+  }
+
+  /* ------------------------- 게임 오버 ------------------------- */
+  gameOver() {   // 일반 모드: 하트를 모두 잃음
+    const p = this.player;
+    this.explode(p.x, p.y, 2);
+    this.time.delayedCall(160, () => this.explode(p.x + 16, p.y - 10, 1));
+    Haptics.vibrate([250, 80, 250]);
+    this.hidePlayer();
+    this.finishGame(1300);
+  }
+
+  finishGame(delay) {
+    const s = this.state;
+    if (s.over) return;
+    s.over = true;
+    s.frozen = false;
+    this.physics.resume();
+    this.hidePlayer();
     this.pauseBtn.setVisible(false).disableInteractive();
+    this.bombBtn.setVisible(false).disableInteractive();
 
     const isNew = s.score > s.best;
-    if (isNew) Store.set('best', s.score);
-    Ranking.submit(s.score, Store.get('plane', 'RAPTOR-X'));
-    this.time.delayedCall(1300, () => this.showGameOver(isNew));
+    if (isNew) Store.set('best_' + s.mode, s.score);
+    this.time.delayedCall(delay, () => this.showGameOver(isNew));
   }
 
   showGameOver(isNew) {
     const W = GAME_W, H = GAME_H, s = this.state;
     const c = this.add.container(0, 0).setDepth(200).setAlpha(0);
-    const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.7).setOrigin(0).setInteractive();
-    const g = this.add.graphics();
-    g.fillStyle(0x0f2440, 0.96); g.fillRoundedRect(30, 220, W - 60, 460, 22);
-    g.lineStyle(2, 0x5fa8ff, 0.6); g.strokeRoundedRect(30, 220, W - 60, 460, 22);
     const sec = Math.floor(s.elapsed);
     const time = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    let stats = '격추 ' + s.kills + '  ·  생존 ' + time;
+    if (s.mode === 'arcade') stats += '  ·  이어하기 ' + s.continues;
     c.add([
-      dim, g,
-      txt(this, W / 2, 272, 'GAME OVER', 44, '#ff5d6c', { stroke: '#2a0008', strokeThickness: 6 }),
-      txt(this, W / 2, 330, 'SCORE', 16, '#9ec9ff'),
-      txt(this, W / 2, 370, fmt(s.score), 44, '#ffffff'),
-      txt(this, W / 2, 422, 'BEST  ' + fmt(Math.max(s.best, s.score)), 18, '#ffd166'),
-      txt(this, W / 2, 490, '격추 ' + s.kills + '  ·  생존 ' + time, 15, '#cfe3ff')
+      this.add.rectangle(0, 0, W, H, 0x000814, 0.7).setOrigin(0).setInteractive(),
+      drawPanel(this, 30, 190, W - 60, 520),
+      txt(this, W / 2, 240, 'GAME OVER', 44, '#ff5d6c', { stroke: '#2a0008', strokeThickness: 6 }),
+      txt(this, W / 2, 284, MODES[s.mode].label, 14, '#9ec9ff'),
+      txt(this, W / 2, 318, 'SCORE', 15, '#9ec9ff'),
+      txt(this, W / 2, 356, fmt(s.score), 44, '#ffffff'),
+      txt(this, W / 2, 404, 'BEST  ' + fmt(Math.max(s.best, s.score)), 18, '#ffd166'),
+      txt(this, W / 2, 466, stats, 14, '#cfe3ff')
     ]);
     if (isNew) {
-      const nr = txt(this, W / 2, 456, 'NEW RECORD!', 20, '#ffe066', { stroke: '#3a1d00', strokeThickness: 4 });
+      const nr = txt(this, W / 2, 435, 'NEW RECORD!', 20, '#ffe066', { stroke: '#3a1d00', strokeThickness: 4 });
       c.add(nr);
       this.tweens.add({ targets: nr, alpha: 0.3, duration: 400, yoyo: true, repeat: -1 });
     }
-    const retry = makeButton(this, W / 2, 560, 240, 62, 'RETRY', () => this.scene.restart(), 'primary', 26);
-    const menu = makeButton(this, W / 2, 632, 240, 50, 'MENU', () => this.scene.start('Menu'), 'secondary', 20);
-    c.add([retry, menu]);
+
+    // 랭킹 등록 (닉네임 입력 → 기기 저장 + 온라인 전송)
+    let submitted = false;
+    const rankBtn = makeButton(this, W / 2, 528, 240, 56, '랭킹 등록', () => {
+      if (submitted) return;
+      NameModal.open(MODES[s.mode].label + ' · ' + fmt(s.score) + '점').then(async (nick) => {
+        if (!nick || !rankBtn.scene) return;
+        submitted = true;
+        rankBtn.label.setText('등록 중…');
+        const res = await Ranking.submit({
+          nickname: nick, score: s.score, mode: s.mode,
+          plane: Store.get('plane', 'RAPTOR-X'), continues: s.continues
+        });
+        if (!rankBtn.scene) return;
+        if (!res.online) rankBtn.label.setText('기기에 저장됨');
+        else if (res.ok) rankBtn.label.setText('등록 완료!');
+        else rankBtn.label.setText('기기에만 저장');
+        rankBtn.setAlpha(0.7);
+      });
+    }, 'accent', 22);
+    const retry = makeButton(this, W / 2, 598, 240, 56, 'RETRY', () => this.scene.restart(), 'primary', 24);
+    const menu = makeButton(this, W / 2, 664, 240, 46, 'MENU', () => this.scene.start('Menu'), 'secondary', 18);
+    c.add([rankBtn, retry, menu]);
+    if (s.score <= 0) rankBtn.setVisible(false);
     // 드래그하던 손가락을 떼다가 버튼이 눌리지 않도록 잠깐 잠근다
-    retry.disableInteractive(); menu.disableInteractive();
-    this.time.delayedCall(600, () => { retry.setInteractive(); menu.setInteractive(); });
+    [rankBtn, retry, menu].forEach((b) => b.disableInteractive());
+    this.time.delayedCall(600, () => [rankBtn, retry, menu].forEach((b) => b.setInteractive()));
     this.tweens.add({ targets: c, alpha: 1, duration: 300 });
   }
 }
@@ -1193,26 +1672,22 @@ class PauseScene extends Phaser.Scene {
   create() {
     const W = GAME_W, H = GAME_H;
     this.add.rectangle(0, 0, W, H, 0x000814, 0.65).setOrigin(0).setInteractive();
-    const g = this.add.graphics();
-    g.fillStyle(0x0f2440, 0.96); g.fillRoundedRect(40, 250, W - 80, 390, 22);
-    g.lineStyle(2, 0x5fa8ff, 0.6); g.strokeRoundedRect(40, 250, W - 80, 390, 22);
-    txt(this, W / 2, 304, 'PAUSED', 40, '#ffffff');
+    drawPanel(this, 40, 236, W - 80, 420);
+    txt(this, W / 2, 288, 'PAUSED', 40, '#ffffff');
 
     const resume = () => { this.scene.stop(); this.scene.resume('Game'); };
-    makeButton(this, W / 2, 384, 240, 62, 'RESUME', resume, 'primary', 26);
-    makeButton(this, W / 2, 458, 240, 52, 'RESTART', () => {
+    makeButton(this, W / 2, 368, 240, 62, 'RESUME', resume, 'primary', 26);
+    makeButton(this, W / 2, 440, 240, 52, 'RESTART', () => {
       const game = this.scene.get('Game');
       this.scene.stop();
       game.scene.restart();
     }, 'secondary', 20);
-    makeButton(this, W / 2, 522, 240, 52, 'MENU', () => {
+    makeButton(this, W / 2, 504, 240, 52, 'MENU', () => {
       this.scene.stop('Game');
       this.scene.start('Menu');
     }, 'secondary', 20);
-    const sBtn = makeButton(this, W / 2, 590, 240, 46, Sound.on ? 'SOUND  ON' : 'SOUND  OFF', () => {
-      Sound.toggle();
-      sBtn.label.setText(Sound.on ? 'SOUND  ON' : 'SOUND  OFF');
-    }, 'secondary', 17);
+    const sBtn = makeButton(this, W / 2 - 62, 580, 116, 46, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15);
+    const vBtn = makeButton(this, W / 2 + 62, 580, 116, 46, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15);
 
     if (this.input.keyboard) {
       this.input.keyboard.on('keydown-P', resume);
@@ -1224,9 +1699,12 @@ class PauseScene extends Phaser.Scene {
 /* =====================================================================
  * 시작
  * ===================================================================== */
-// 모바일 브라우저의 스크롤·핀치 확대·더블탭 확대 방지
+// 모바일 브라우저의 스크롤·핀치 확대·더블탭 확대 방지 (닉네임 입력창은 예외)
 ['touchmove', 'gesturestart', 'gesturechange', 'dblclick', 'contextmenu'].forEach((ev) => {
-  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  document.addEventListener(ev, (e) => {
+    if (e.target && e.target.id === 'nm-input') return;
+    e.preventDefault();
+  }, { passive: false });
 });
 
 const config = {
@@ -1237,14 +1715,13 @@ const config = {
   height: GAME_H,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { debug: false } },
-  input: { activePointers: 2 },
+  input: { activePointers: 3 },      // 이동하면서 다른 손가락으로 폭탄 버튼 누르기
   audio: { noAudio: true },          // 소리는 위의 Sound(WebAudio)가 담당
   render: { antialias: true, powerPreference: 'high-performance' },
   fps: { target: 60 },
   scene: [BootScene, MenuScene, GameScene, PauseScene]
 };
 
-// 웹폰트를 잠깐 기다린 뒤 시작 (최대 1.5초, 실패해도 기본 글꼴로 진행)
 function startGame() { new Phaser.Game(config); }
 if (document.fonts && document.fonts.load) {
   Promise.race([
