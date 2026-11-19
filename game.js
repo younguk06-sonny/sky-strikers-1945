@@ -1941,7 +1941,7 @@ class MenuScene extends Phaser.Scene {
     const c = this.add.container(0, 0).setDepth(100);
     const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.88).setOrigin(0).setInteractive();
     c.add([dim, drawPanel(this, 16, 40, W - 32, 790),
-      txt(this, W / 2, 74, 'HANGAR', 28, '#ffffff'),
+      txt(this, W / 2, 74, '격납고', 28, '#ffffff'),
       txt(this, W / 2, 104, '조종사를 고르고 출격하세요', 13, '#9ec9ff')]);
 
     let sel = PLANES.indexOf(getPlane());
@@ -2033,7 +2033,7 @@ class MenuScene extends Phaser.Scene {
     const W = GAME_W, H = GAME_H;
     const c = this.add.container(0, 0).setDepth(100);
     const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.85).setOrigin(0).setInteractive();
-    c.add([dim, drawPanel(this, 20, 70, W - 40, 720), txt(this, W / 2, 110, 'RANKING', 30, '#ffffff')]);
+    c.add([dim, drawPanel(this, 20, 70, W - 40, 720), txt(this, W / 2, 110, '랭킹', 30, '#ffffff')]);
     this.rankMode = this.mode;
     this.rankTabs = makeToggle(this, W / 2, 160, 300, 42, [MODES.normal.label, MODES.arcade.label], this.rankMode === 'arcade' ? 1 : 0, (i) => {
       this.rankMode = i === 1 ? 'arcade' : 'normal';
@@ -4027,8 +4027,8 @@ class GameScene extends Phaser.Scene {
         rankBtn.setAlpha(0.7);
       });
     }, 'accent', 22);
-    const retry = makeButton(this, W / 2, 598, 240, 56, 'RETRY', () => this.scene.restart(), 'primary', 24);
-    const menu = makeButton(this, W / 2, 664, 240, 46, 'MENU', () => this.scene.start('Menu'), 'secondary', 18);
+    const retry = makeButton(this, W / 2, 598, 240, 56, '다시 하기', () => this.scene.restart(), 'primary', 24);
+    const menu = makeButton(this, W / 2, 664, 240, 46, '메인 화면', () => this.scene.start('Menu'), 'secondary', 18);
     c.add([rankBtn, retry, menu]);
     if (s.score <= 0) rankBtn.setVisible(false);
     // 드래그하던 손가락을 떼다가 버튼이 눌리지 않도록 잠깐 잠근다
@@ -4049,18 +4049,18 @@ class PauseScene extends Phaser.Scene {
     this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
     this.add.rectangle(0, 0, W, H, 0x000814, 0.65).setOrigin(0).setInteractive();
     drawPanel(this, 40, 236, W - 80, 452);
-    txt(this, W / 2, 288, 'PAUSED', 40, '#ffffff');
+    txt(this, W / 2, 288, '일시정지', 36, '#ffffff');
 
     Music.pause(true);
     const resume = () => { Music.pause(false); this.scene.stop(); this.scene.resume('Game'); };
-    makeButton(this, W / 2, 368, 240, 62, 'RESUME', resume, 'primary', 26);
-    makeButton(this, W / 2, 440, 240, 52, 'RESTART', () => {
+    makeButton(this, W / 2, 368, 240, 62, '계속하기', resume, 'primary', 24);
+    makeButton(this, W / 2, 440, 240, 52, '처음부터 다시', () => {
       const game = this.scene.get('Game');
       Music.pause(false);
       this.scene.stop();
       game.scene.restart();
     }, 'secondary', 20);
-    makeButton(this, W / 2, 504, 240, 52, 'MENU', () => {
+    makeButton(this, W / 2, 504, 240, 52, '메인 화면', () => {
       Music.pause(false);
       this.scene.stop('Game');
       this.scene.start('Menu');
