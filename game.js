@@ -320,13 +320,13 @@ const Sound = {
 // 전투기 4종: hp(일반 모드 하트), armor(오락실 모드 목숨마다 방어막), speed(최고 이동속도), inv(피격 후 무적시간)
 const PLANES = [
   { id: 'RAPTOR-X',  key: 'player',        type: '균형형',   atk: 3, spd: 3, def: 3,
-    desc: '쌍발 기관포 + 유도미사일', note: '미사일이 알아서 적을 쫓아가요', hp: 3, armor: 0, speed: 950, inv: 1.8 },
+    desc: '쌍발 기관포 + 유도미사일', note: '미사일이 알아서 적을 쫓아가요', bomb: '폭탄: 아군 폭격기 편대의 융단 폭격', hp: 3, armor: 0, speed: 950, inv: 1.8 },
   { id: 'PHANTOM-Z', key: 'plane_phantom', type: '고속형',   atk: 3, spd: 5, def: 2,
-    desc: '적을 꿰뚫는 관통 레이저', note: '가장 빠른 기체 · 일렬로 선 적에 강함', hp: 3, armor: 0, speed: 1400, inv: 1.5 },
+    desc: '적을 꿰뚫는 관통 레이저', note: '가장 빠른 기체 · 일렬로 선 적에 강함', bomb: '폭탄: 화면을 쓸고 올라가는 플라즈마 벽', hp: 3, armor: 0, speed: 1400, inv: 1.5 },
   { id: 'THUNDER-A', key: 'plane_thunder', type: '중장갑형', atk: 4, spd: 2, def: 5,
-    desc: '5갈래 확산탄', note: '일반: 하트 4개 · 오락실: 목숨마다 방어막', hp: 4, armor: 1, speed: 680, inv: 2.2 },
+    desc: '5갈래 확산탄', note: '일반: 하트 4개 · 오락실: 목숨마다 방어막', bomb: '폭탄: 3초간 탄을 막는 거대 방어막', hp: 4, armor: 1, speed: 680, inv: 2.2 },
   { id: 'BLAZE-F',   key: 'plane_blaze',   type: '공격형',   atk: 5, spd: 3, def: 2,
-    desc: '맞으면 터지는 폭발탄', note: '폭발이 주변 적까지 함께 피해', hp: 3, armor: 0, speed: 950, inv: 1.5 }
+    desc: '맞으면 터지는 폭발탄', note: '폭발이 주변 적까지 함께 피해', bomb: '폭탄: 화면 곳곳에 화염 폭격 9연발', hp: 3, armor: 0, speed: 950, inv: 1.5 }
 ];
 const getPlane = () => PLANES.find((p) => p.id === Store.get('plane', 'RAPTOR-X')) || PLANES[0];
 
@@ -851,14 +851,15 @@ class MenuScene extends Phaser.Scene {
 
     // 선택한 기체 상세
     const box = this.add.graphics();
-    box.fillStyle(0x0b1a2e, 0.7); box.fillRoundedRect(36, 538, W - 72, 172, 14);
+    box.fillStyle(0x0b1a2e, 0.7); box.fillRoundedRect(36, 538, W - 72, 180, 14);
     const dTitle = txt(this, W / 2, 562, '', 18, '#ffffff');
     const bars = this.add.graphics();
     const statLabels = ['공격력', '속도', '방어력'].map((l, k) =>
       this.add.text(W / 2 - 105, 596 + k * 26, l, { fontFamily: FONT, fontSize: '14px', color: '#cfe3ff' }).setOrigin(0, 0.5));
-    const dDesc = txt(this, W / 2, 676, '', 14, '#e8f1ff');
-    const dNote = txt(this, W / 2, 696, '', 12, '#9ec9ff');
-    c.add([box, dTitle, bars, dDesc, dNote].concat(statLabels));
+    const dDesc = txt(this, W / 2, 668, '', 14, '#e8f1ff');
+    const dNote = txt(this, W / 2, 687, '', 12, '#9ec9ff');
+    const dBomb = txt(this, W / 2, 705, '', 12, '#ffb3b8');
+    c.add([box, dTitle, bars, dDesc, dNote, dBomb].concat(statLabels));
 
     const refresh = () => {
       cards.forEach((cd, i) => {
@@ -881,6 +882,7 @@ class MenuScene extends Phaser.Scene {
       });
       dDesc.setText(p.desc);
       dNote.setText(p.note);
+      dBomb.setText(p.bomb);
     };
     refresh();
 
@@ -1007,6 +1009,9 @@ class GameScene extends Phaser.Scene {
     this.missileT = 0.5;
     this.bombT = 0;
     this.specialActive = false;
+    this.carpet = null;      // RAPTOR-X 융단 폭격
+    this.wall = null;        // PHANTOM-Z 플라즈마 벽
+    this.barrier = null;     // THUNDER-A 방어막
     this.beamT = 0;
     this.beamGfx = null;     // 재시작 시 예전 그래픽 참조가 남지 않게
     this.wingT = 0;
@@ -1278,10 +1283,8 @@ class GameScene extends Phaser.Scene {
     }
     this.updateSpecial(dt);
     this.updateBossBar();
-    if (this.bombT > 0) {                     // 폭탄 지속 중엔 새로 쏜 탄도 지운다
-      this.bombT -= dt;
-      this.clearBullets(0, 0, Infinity, false);
-    }
+    if (this.bombT > 0) this.bombT -= dt;
+    this.updateBomb(dt);
     this.updateEnemies(dt);
     this.updateBullets(dt);
   }
@@ -1432,7 +1435,7 @@ class GameScene extends Phaser.Scene {
   // 적 탄: 판정 원은 그림보다 작게 잡아 억울한 피격을 줄인다
   fireEnemyBullet(x, y, angle, speed, big) {
     const s = this.state;
-    if (s.over || s.dead || this.bombT > 0) return;
+    if (s.over || s.dead) return;
     if (this.eBullets.countActive(true) > 220) return;
     const key = big ? 'eb2' : 'eb';
     const b = this.eBullets.get(x, y, key);
@@ -1494,35 +1497,135 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ------------------------- 폭탄 -------------------------
-   * 화면의 적 탄을 모두 지우고, 화면 안 적에게 큰 피해.
-   * 발동 중 잠시 무적 + 진동.
+   * 기체마다 다른 폭탄. 공통: 쓰는 순간 주변 적 탄을 지우고
+   * 폭탄이 끝날 때까지 무적이라 위기 탈출용으로 쓸 수 있다.
    * ------------------------------------------------------- */
   useBomb() {
     const s = this.state;
     if (s.over || s.dead || s.frozen || s.bombs <= 0 || this.bombT > 0) return;
     if (!this.scene.isActive()) return;
+    const p = this.player, id = this.plane.id;
+    const dur = { 'RAPTOR-X': 1.9, 'PHANTOM-Z': 1.2, 'THUNDER-A': 3.0, 'BLAZE-F': 1.5 }[id];
     s.bombs--;
     this.updateBombUi();
-    this.bombT = 1.0;
-    this.invuln = Math.max(this.invuln, 1.4);
+    this.bombT = dur;
+    this.invuln = Math.max(this.invuln, dur + 0.3);
     Sound.unlock(); Sound.bomb();
     Haptics.vibrate([0, 220, 60, 120]);
+    this.clearBullets(p.x, p.y, 170, true);
+    this.cameras.main.shake(300, 0.008);
 
-    const p = this.player;
-    this.clearBullets(0, 0, Infinity, true);
-    this.cameras.main.flash(260, 255, 236, 190);
-    this.cameras.main.shake(420, 0.012);
+    const name = { 'RAPTOR-X': 'CARPET BOMBING', 'PHANTOM-Z': 'PLASMA WALL', 'THUNDER-A': 'IRON BARRIER', 'BLAZE-F': 'FIRE STORM' }[id];
+    const cut = txt(this, GAME_W / 2, GAME_H / 2 - 160, name, 30, '#ffd0d5', { stroke: '#4a0010', strokeThickness: 6 }).setDepth(46);
+    this.tweens.add({ targets: cut, alpha: 0, y: cut.y - 30, delay: 600, duration: 400, onComplete: () => cut.destroy() });
 
-    const ring = this.add.circle(p.x, p.y, 12).setStrokeStyle(8, 0xfff1b8, 0.95).setDepth(16);
-    this.tweens.add({ targets: ring, scale: 80, alpha: 0, duration: 700, ease: 'Cubic.out', onComplete: () => ring.destroy() });
-    for (let i = 0; i < 9; i++) {
-      this.time.delayedCall(i * 55, () => this.explode(randInt(30, GAME_W - 30), randInt(120, GAME_H - 220), 0, true));
-    }
-    this.time.delayedCall(150, () => {
-      this.enemies.getChildren().slice().forEach((e) => {
-        if (e.active && e.y > -20 && e.y < GAME_H) this.damageEnemy(e, 20);
+    if (id === 'RAPTOR-X') {
+      // 아군 폭격기 3대가 아래에서 위로 지나가며 폭탄을 줄줄이 떨어뜨림
+      const xs = [GAME_W * 0.2, GAME_W * 0.5, GAME_W * 0.8];
+      const planes = xs.map((x, i) => {
+        const b = this.add.image(x, GAME_H + 70 + (i === 1 ? 0 : 50), 'e_bomber')
+          .setFlipY(true).setTint(0x9cc4ff).setScale(0.75).setDepth(13);
+        this.tweens.add({ targets: b, y: -140, duration: 1800, ease: 'Linear', onComplete: () => b.destroy() });
+        return b;
       });
+      this.carpet = { planes, dropT: 0, t: 0 };
+    } else if (id === 'PHANTOM-Z') {
+      // 화면 폭 전체의 에너지 벽이 기체 앞에서 위로 쓸고 올라감
+      this.wall = { y: p.y - 30, hit: new Set(), g: this.add.graphics().setDepth(13).setBlendMode(Phaser.BlendModes.ADD) };
+      this.cameras.main.flash(160, 160, 230, 255);
+    } else if (id === 'THUNDER-A') {
+      // 기체 주위 거대 방어막: 닿는 탄은 지워지고, 안쪽 적은 지속 피해
+      const img = this.add.image(p.x, p.y, 'shield').setScale(3.6).setDepth(11).setTint(0xb8ffcf);
+      this.barrier = { t: dur, img };
+    } else {
+      // 적 위치를 노려 화염 폭격 9연발
+      for (let i = 0; i < 9; i++) {
+        this.time.delayedCall(120 + i * 140, () => {
+          if (this.state.over) return;
+          const alive = this.enemies.getChildren().filter((e) => e.active && e.y > 40 && e.y < GAME_H - 160);
+          let x = randInt(50, GAME_W - 50), y = randInt(130, Math.floor(GAME_H * 0.6));
+          if (alive.length && Math.random() < 0.65) {
+            const e = Phaser.Utils.Array.GetRandom(alive);
+            x = e.x + rand(-20, 20); y = e.y + rand(-20, 20);
+          }
+          this.napalm(x, y);
+        });
+      }
+    }
+  }
+
+  // BLAZE-F 화염 폭격 한 발
+  napalm(x, y) {
+    this.explode(x, y, 1, true);
+    const ring = this.add.circle(x, y, 14).setStrokeStyle(8, 0xff7b1c, 0.9).setDepth(16);
+    this.tweens.add({ targets: ring, scale: 6.5, alpha: 0, duration: 380, onComplete: () => ring.destroy() });
+    this.cameras.main.shake(120, 0.006);
+    this.clearBullets(x, y, 110, true);
+    this.enemies.getChildren().slice().forEach((e) => {
+      if (e.active && Phaser.Math.Distance.Between(x, y, e.x, e.y) < 95 + e.displayWidth * 0.2) this.damageEnemy(e, 16);
     });
+  }
+
+  updateBomb(dt) {
+    const p = this.player;
+    // RAPTOR-X 융단 폭격
+    if (this.carpet) {
+      const c = this.carpet;
+      c.t += dt; c.dropT -= dt;
+      if (c.dropT <= 0) {
+        c.dropT = 0.11;
+        c.planes.forEach((b) => {
+          if (!b.active || b.y > GAME_H - 20 || b.y < 0) return;
+          const x = b.x + rand(-34, 34), y = b.y - 30;
+          this.explode(x, y, 0, true);
+          this.clearBullets(x, y, 75, false);
+          this.enemies.getChildren().slice().forEach((e) => {
+            if (e.active && Phaser.Math.Distance.Between(x, y, e.x, e.y) < 64 + e.displayWidth * 0.25) this.damageEnemy(e, 5);
+          });
+        });
+      }
+      if (c.t > 1.9) this.carpet = null;
+    }
+    // PHANTOM-Z 플라즈마 벽
+    if (this.wall) {
+      const w = this.wall;
+      w.y -= 950 * dt;
+      w.g.clear();
+      if (w.y < -40) {
+        w.g.destroy();
+        this.wall = null;
+      } else {
+        w.g.fillStyle(0x5fd3ff, 0.3); w.g.fillRect(0, w.y - 26, GAME_W, 52);
+        w.g.fillStyle(0xbff4ff, 0.7); w.g.fillRect(0, w.y - 9, GAME_W, 18);
+        w.g.fillStyle(0xffffff, 1); w.g.fillRect(0, w.y - 2, GAME_W, 4);
+        this.eBullets.children.each((b) => { if (b.active && Math.abs(b.y - w.y) < 34) b.disableBody(true, true); });
+        this.enemies.getChildren().slice().forEach((e) => {
+          if (!e.active || w.hit.has(e)) return;
+          if (Math.abs(e.y - w.y) < 26 + e.displayHeight * 0.4) {
+            w.hit.add(e);
+            this.fxHit.explode(8, e.x, e.y);
+            this.damageEnemy(e, 26);
+          }
+        });
+      }
+    }
+    // THUNDER-A 방어막
+    if (this.barrier) {
+      const b = this.barrier;
+      b.t -= dt;
+      if (b.t <= 0 || this.state.dead || this.state.over) {
+        this.tweens.add({ targets: b.img, scale: 5, alpha: 0, duration: 250, onComplete: () => b.img.destroy() });
+        this.barrier = null;
+      } else {
+        const r = 122;
+        b.img.setPosition(p.x, p.y).setAngle(b.img.angle + 120 * dt)
+          .setAlpha(b.t < 0.6 ? 0.4 + Math.sin(b.t * 40) * 0.3 : 0.75 + Math.sin(b.t * 8) * 0.2);
+        this.clearBullets(p.x, p.y, r, Math.random() < 0.3);
+        this.enemies.getChildren().slice().forEach((e) => {
+          if (e.active && Phaser.Math.Distance.Between(p.x, p.y, e.x, e.y) < r + e.displayWidth * 0.3) this.damageEnemy(e, 20 * dt);
+        });
+      }
+    }
   }
 
   /* ------------------------- 차지 게이지 -------------------------
