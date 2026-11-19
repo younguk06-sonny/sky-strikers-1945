@@ -729,11 +729,11 @@ const PLANES = [
 const PILOTS = {
   'RAPTOR-X':  { name: '한영웅', en: 'HAN YEONG-UNG', nation: '대한민국', flag: 'flag_kr', face: 'pilot_han', age: 27,
                  role: '편대장 · 침착한 전략가', quote: '"하늘은 우리가 지킨다."' },
-  'PHANTOM-Z': { name: '클레르 뒤부아', en: 'CLAIRE DUBOIS', nation: '프랑스', flag: 'flag_fr', face: 'pilot_claire', age: 24,
+  'PHANTOM-Z': { name: '마리 블랑', en: 'MARIE BLANC', nation: '프랑스', flag: 'flag_fr', face: 'pilot_claire', age: 24,
                  role: '최연소 에이스 · 스피드광', quote: '"따라올 수 있으면 따라와 봐!"' },
-  'THUNDER-A': { name: '잭 카터', en: 'JACK CARTER', nation: '미국', flag: 'flag_us', face: 'pilot_jack', age: 38,
+  'THUNDER-A': { name: '잭 "이글" 존슨', en: 'JACK "EAGLE" JOHNSON', nation: '미국', flag: 'flag_us', face: 'pilot_jack', age: 38,
                  role: '베테랑 · 편대의 방패', quote: '"뒤는 맡겨, 꼬맹이들."' },
-  'BLAZE-F':   { name: '올리버 브룩스', en: 'OLIVER BROOKS', nation: '영국', flag: 'flag_uk', face: 'pilot_oliver', age: 31,
+  'BLAZE-F':   { name: '윌리엄 "로열" 스미스', en: 'WILLIAM "ROYAL" SMITH', nation: '영국', flag: 'flag_uk', face: 'pilot_oliver', age: 31,
                  role: '폭격 전문가 · 홍차 마니아', quote: '"티타임 전에 끝내자고."' }
 };
 PLANES.forEach((p) => { p.pilot = PILOTS[p.id]; });
@@ -918,6 +918,13 @@ function makeSensControl(scene, x, y) {
 }
 
 // 창(오버레이)을 닫을 때 안쪽 버튼의 입력까지 확실히 끈다
+// 글자가 칸보다 길면 한 줄을 유지한 채 크기만 줄여서 맞춤
+function fitText(t, maxW) {
+  t.setScale(1);
+  if (t.width > maxW) t.setScale(maxW / t.width);
+  return t;
+}
+
 function setInputEnabled(obj, on) {
   if (obj.input) obj.input.enabled = on;
   if (obj.list) obj.list.forEach((o) => setInputEnabled(o, on));
@@ -1221,7 +1228,7 @@ function drawPilotHan(g) {          // 한영웅: 검은 포니테일, 빨간 �
   g.fillStyle(0xc0565a, 1); g.fillRoundedRect(29.5, 41, 5, 1.8, 0.9);
 }
 
-function drawPilotClaire(g) {       // 클레르: 금발 단발, 파란 머플러, 윙크
+function drawPilotClaire(g) {       // 마리: 금발 단발, 파란 머플러, 윙크
   g.fillStyle(0x2a2f6e, 1); g.fillCircle(32, 32, 32);
   g.fillStyle(0xe8bf5a, 1); g.fillEllipse(32, 31, 42, 40);
   g.fillStyle(0x6e5a3a, 1); g.fillEllipse(32, 64, 52, 26);
@@ -1237,7 +1244,7 @@ function drawPilotClaire(g) {       // 클레르: 금발 단발, 파란 머플�
   g.fillStyle(0xc0565a, 1); g.fillTriangle(29, 41, 36, 41, 33, 43.5);
 }
 
-function drawPilotJack(g) {         // 잭: 가죽 비행모, 선글라스, 수염
+function drawPilotJack(g) {         // 잭 존슨: 가죽 비행모, 선글라스, 수염
   g.fillStyle(0x5c2a2a, 1); g.fillCircle(32, 32, 32);
   g.fillStyle(0x5d6b3a, 1); g.fillEllipse(32, 64, 62, 30);
   g.fillStyle(0x8d5a3b, 1); g.fillRect(25, 42, 14, 12);
@@ -1253,7 +1260,7 @@ function drawPilotJack(g) {         // 잭: 가죽 비행모, 선글라스, 수�
   g.fillStyle(0xd48a8a, 1); g.fillRoundedRect(29, 43, 6, 1.6, 0.8);
 }
 
-function drawPilotOliver(g) {       // 올리버: 붉은 머리, 가죽 헬멧, 콧수염
+function drawPilotOliver(g) {       // 윌리엄: 붉은 머리, 가죽 헬멧, 콧수염
   g.fillStyle(0x2f4a3a, 1); g.fillCircle(32, 32, 32);
   g.fillStyle(0x7a5230, 1); g.fillEllipse(32, 64, 54, 26);
   g.fillStyle(0xf2c9a8, 1); g.fillRect(27, 43, 10, 10);
@@ -1882,6 +1889,7 @@ class MenuScene extends Phaser.Scene {
     this.bestLabel = txt(this, W / 2, 329, '', 21, '#ffd166').setDepth(11);
     this.planeLabel = txt(this, W / 2, 356, '', 14, '#cfe3ff').setDepth(11);
     this.planeLabel.setText(getPlane().id + '  ·  ' + getPlane().pilot.name + ' (' + getPlane().pilot.nation + ')');
+    fitText(this.planeLabel, 244);
 
     // 모드 선택
     this.diff = getDiff();
@@ -1951,7 +1959,7 @@ class MenuScene extends Phaser.Scene {
       cards.push({ g, img, cx, cy });
       c.add([g, img, face, flag,
         txt(this, cx, cy + 40, pl.id, 15, '#ffffff'),
-        txt(this, cx, cy + 60, pl.pilot.name, 13, '#ffd166'), z]);
+        fitText(txt(this, cx, cy + 60, pl.pilot.name, 13, '#ffd166'), cw - 14), z]);
     });
 
     // 상세: 조종사 프로필 + 기체 성능
@@ -1991,7 +1999,7 @@ class MenuScene extends Phaser.Scene {
       });
       const p = PLANES[sel], pi = p.pilot;
       face.setTexture(pi.face);
-      pName.setText(pi.name + '  ' + pi.age + '세');
+      fitText(pName.setText(pi.name + '  ' + pi.age + '세'), W - 30 - 126 - 12);
       pEn.setText(pi.en);
       pFlag.setTexture(pi.flag);
       pNation.setText(pi.nation);
