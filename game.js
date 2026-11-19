@@ -328,6 +328,19 @@ const PLANES = [
   { id: 'BLAZE-F',   key: 'plane_blaze',   type: '공격형',   atk: 5, spd: 3, def: 2,
     desc: '맞으면 터지는 폭발탄', note: '폭발이 주변 적까지 함께 피해', bomb: '폭탄: 화면 곳곳에 화염 폭격 9연발', hp: 3, armor: 0, speed: 950, inv: 1.5 }
 ];
+// 조종사 (모두 이 게임을 위해 만든 가상의 인물)
+const PILOTS = {
+  'RAPTOR-X':  { name: '한서진', en: 'HAN SEO-JIN', nation: '대한민국', flag: 'flag_kr', face: 'pilot_han', age: 27,
+                 role: '편대장 · 침착한 전략가', quote: '"하늘은 우리가 지킨다."' },
+  'PHANTOM-Z': { name: '클레르 뒤부아', en: 'CLAIRE DUBOIS', nation: '프랑스', flag: 'flag_fr', face: 'pilot_claire', age: 24,
+                 role: '최연소 에이스 · 스피드광', quote: '"따라올 수 있으면 따라와 봐!"' },
+  'THUNDER-A': { name: '잭 카터', en: 'JACK CARTER', nation: '미국', flag: 'flag_us', face: 'pilot_jack', age: 38,
+                 role: '베테랑 · 편대의 방패', quote: '"뒤는 맡겨, 꼬맹이들."' },
+  'BLAZE-F':   { name: '올리버 브룩스', en: 'OLIVER BROOKS', nation: '영국', flag: 'flag_uk', face: 'pilot_oliver', age: 31,
+                 role: '폭격 전문가 · 홍차 마니아', quote: '"티타임 전에 끝내자고."' }
+};
+PLANES.forEach((p) => { p.pilot = PILOTS[p.id]; });
+
 const getPlane = () => PLANES.find((p) => p.id === Store.get('plane', 'RAPTOR-X')) || PLANES[0];
 
 // 적 3종: 체력·점수·충돌 반경·폭발 크기 (폭격기는 지금 단계의 중간 보스)
@@ -531,6 +544,124 @@ function drawBlaze(g) { // 주황·빨강 공격기
   g.fillStyle(0xffb347, 1); g.fillEllipse(27, 20, 2.5, 4);
 }
 
+/* ---------- 조종사 얼굴 (64×64) ---------- */
+function drawPilotHan(g) {          // 한서진: 검은 포니테일, 빨간 머플러, 이마 위 고글
+  g.fillStyle(0x1d3d66, 1); g.fillCircle(32, 32, 32);
+  g.fillStyle(0x161616, 1); g.fillEllipse(32, 27, 40, 40); g.fillEllipse(52, 40, 10, 22);
+  g.fillStyle(0x3b5b7a, 1); g.fillEllipse(32, 64, 54, 26);
+  g.fillStyle(0xf1c6a5, 1); g.fillRect(27, 43, 10, 10);
+  g.fillStyle(0xe63946, 1); g.fillEllipse(32, 53, 28, 9); g.fillTriangle(38, 53, 46, 62, 41, 52);
+  g.fillStyle(0xf3cfb0, 1); g.fillEllipse(32, 33, 26, 30);
+  g.fillStyle(0x161616, 1); g.fillEllipse(27, 21, 24, 11); g.fillTriangle(19, 22, 31, 17, 21, 31); g.fillEllipse(42, 22, 10, 9);
+  g.fillStyle(0x8a5a2b, 1); g.fillRect(17, 15, 30, 5);
+  g.fillStyle(0x7fd3ff, 1); g.fillCircle(25, 17, 4); g.fillCircle(39, 17, 4);
+  g.fillStyle(0xffffff, 0.8); g.fillCircle(24, 16, 1.2); g.fillCircle(38, 16, 1.2);
+  g.fillStyle(0x1a1a1a, 1); g.fillEllipse(27, 33, 3.2, 4); g.fillEllipse(37, 33, 3.2, 4);
+  g.fillRect(24, 28.5, 6, 1.3); g.fillRect(34, 28.5, 6, 1.3);
+  g.fillStyle(0xf2a99a, 0.6); g.fillCircle(24, 38, 2.5); g.fillCircle(40, 38, 2.5);
+  g.fillStyle(0xc0565a, 1); g.fillRoundedRect(29.5, 41, 5, 1.8, 0.9);
+}
+
+function drawPilotClaire(g) {       // 클레르: 금발 단발, 파란 머플러, 윙크
+  g.fillStyle(0x2a2f6e, 1); g.fillCircle(32, 32, 32);
+  g.fillStyle(0xe8bf5a, 1); g.fillEllipse(32, 31, 42, 40);
+  g.fillStyle(0x6e5a3a, 1); g.fillEllipse(32, 64, 52, 26);
+  g.fillStyle(0xf7d9c4, 1); g.fillRect(27, 43, 10, 10);
+  g.fillStyle(0x3a7bd5, 1); g.fillEllipse(32, 53, 28, 9); g.fillTriangle(24, 53, 16, 62, 22, 52);
+  g.fillStyle(0xf7d9c4, 1); g.fillEllipse(32, 34, 25, 28);
+  g.fillStyle(0xf4d27a, 1); g.fillEllipse(32, 21, 30, 13); g.fillTriangle(20, 22, 34, 18, 22, 32);
+  g.fillStyle(0x444b55, 1); g.fillRect(16, 13, 32, 4);
+  g.fillStyle(0xffd27a, 1); g.fillCircle(25, 15, 3.5); g.fillCircle(39, 15, 3.5);
+  g.fillStyle(0x2b5fa8, 1); g.fillEllipse(27, 34, 3.4, 4.2);
+  g.fillStyle(0x1a1a1a, 1); g.fillRect(34.5, 34, 5, 1.4);
+  g.fillStyle(0xf2a99a, 0.6); g.fillCircle(24, 39, 2.4); g.fillCircle(40, 39, 2.4);
+  g.fillStyle(0xc0565a, 1); g.fillTriangle(29, 41, 36, 41, 33, 43.5);
+}
+
+function drawPilotJack(g) {         // 잭: 가죽 비행모, 선글라스, 수염
+  g.fillStyle(0x5c2a2a, 1); g.fillCircle(32, 32, 32);
+  g.fillStyle(0x5d6b3a, 1); g.fillEllipse(32, 64, 62, 30);
+  g.fillStyle(0x8d5a3b, 1); g.fillRect(25, 42, 14, 12);
+  g.fillStyle(0xf2f2f2, 1); g.fillEllipse(32, 53, 30, 9);
+  g.fillStyle(0x8d5a3b, 1); g.fillEllipse(32, 33, 30, 32);
+  g.fillStyle(0x2b1d14, 1); g.fillEllipse(32, 42, 26, 16);
+  g.fillStyle(0x8d5a3b, 1); g.fillEllipse(32, 38, 22, 10);
+  g.fillStyle(0x2b1d14, 1); g.fillRoundedRect(26, 37, 12, 3, 1.5);
+  g.fillStyle(0x6b4a2b, 1); g.fillEllipse(32, 21, 34, 20); g.fillRoundedRect(15, 20, 7, 18, 3); g.fillRoundedRect(42, 20, 7, 18, 3);
+  g.fillStyle(0x4a3220, 1); g.fillRect(17, 24, 30, 2.5);
+  g.fillStyle(0x111111, 1); g.fillRoundedRect(20, 28, 11, 7, 3); g.fillRoundedRect(33, 28, 11, 7, 3); g.fillRect(30, 30, 4, 1.5);
+  g.fillStyle(0xffffff, 0.35); g.fillRect(22, 29, 4, 1.5); g.fillRect(35, 29, 4, 1.5);
+  g.fillStyle(0xd48a8a, 1); g.fillRoundedRect(29, 43, 6, 1.6, 0.8);
+}
+
+function drawPilotOliver(g) {       // 올리버: 붉은 머리, 가죽 헬멧, 콧수염
+  g.fillStyle(0x2f4a3a, 1); g.fillCircle(32, 32, 32);
+  g.fillStyle(0x7a5230, 1); g.fillEllipse(32, 64, 54, 26);
+  g.fillStyle(0xf2c9a8, 1); g.fillRect(27, 43, 10, 10);
+  g.fillStyle(0xe8dcc0, 1); g.fillEllipse(32, 53, 28, 9);
+  g.fillStyle(0xf2c9a8, 1); g.fillEllipse(32, 34, 26, 29);
+  g.fillStyle(0xc8642c, 1); g.fillEllipse(32, 24, 28, 12);
+  g.fillStyle(0x7a5230, 1); g.fillEllipse(32, 18, 34, 18); g.fillRoundedRect(16, 18, 7, 20, 3); g.fillRoundedRect(41, 18, 7, 20, 3);
+  g.fillStyle(0x555b63, 1); g.fillRect(17, 16, 30, 4);
+  g.fillStyle(0x9ad9c0, 1); g.fillCircle(25, 18, 3.5); g.fillCircle(39, 18, 3.5);
+  g.fillStyle(0x1a1a1a, 1); g.fillEllipse(27, 32, 3, 3.6); g.fillEllipse(37, 32, 3, 3.6);
+  g.fillStyle(0xb5561f, 1); g.fillEllipse(28, 39, 9, 3.2); g.fillEllipse(36, 39, 9, 3.2);
+  g.fillStyle(0xc0565a, 1); g.fillRoundedRect(30, 42.5, 4, 1.4, 0.7);
+}
+
+/* ---------- 국기 (54×36) ---------- */
+function trigram(g, cx, cy, ang, pattern) {   // 태극기 괘: pattern = 안쪽→바깥 [막대가 이어졌는지]
+  const len = 9, th = 1.8, gap = 1.4;
+  const ux = Math.cos(ang), uy = Math.sin(ang), px = -uy, py = ux;
+  pattern.forEach((solid, i) => {
+    const off = (i - 1) * (th + gap);
+    const bx = cx + ux * off, by = cy + uy * off;
+    const segs = solid ? [[-len / 2, len / 2]] : [[-len / 2, -0.9], [0.9, len / 2]];
+    segs.forEach(([a, b]) => {
+      g.fillPoints([[a, -th / 2], [b, -th / 2], [b, th / 2], [a, th / 2]]
+        .map(([sx, tt]) => ({ x: bx + px * sx + ux * tt, y: by + py * sx + uy * tt })), true);
+    });
+  });
+}
+
+function drawFlagKR(g) {
+  g.fillStyle(0xffffff, 1); g.fillRect(0, 0, 54, 36);
+  g.lineStyle(1, 0xcccccc, 1); g.strokeRect(0.5, 0.5, 53, 35);
+  const cx = 27, cy = 18, r = 7.5;
+  g.fillStyle(0x0047a0, 1); g.fillCircle(cx, cy, r);
+  g.fillStyle(0xcd2e3a, 1); g.slice(cx, cy, r, Math.PI, Math.PI * 2, false); g.fillPath();
+  g.fillStyle(0xcd2e3a, 1); g.fillCircle(cx - r / 2, cy, r / 2);
+  g.fillStyle(0x0047a0, 1); g.fillCircle(cx + r / 2, cy, r / 2);
+  g.fillStyle(0x111111, 1);
+  const d = (x, y) => Math.atan2(y - cy, x - cx);
+  trigram(g, 11, 7.5, d(11, 7.5), [true, true, true]);      // 건 ☰
+  trigram(g, 43, 7.5, d(43, 7.5), [false, true, false]);    // 감 ☵
+  trigram(g, 11, 28.5, d(11, 28.5), [true, false, true]);   // 리 ☲
+  trigram(g, 43, 28.5, d(43, 28.5), [false, false, false]); // 곤 ☷
+}
+
+function drawFlagFR(g) {
+  g.fillStyle(0x0055a4, 1); g.fillRect(0, 0, 18, 36);
+  g.fillStyle(0xffffff, 1); g.fillRect(18, 0, 18, 36);
+  g.fillStyle(0xef4135, 1); g.fillRect(36, 0, 18, 36);
+}
+
+function drawFlagUS(g) {
+  const sh = 36 / 13;
+  for (let i = 0; i < 13; i++) { g.fillStyle(i % 2 ? 0xffffff : 0xb22234, 1); g.fillRect(0, i * sh, 54, sh + 0.2); }
+  g.fillStyle(0x3c3b6e, 1); g.fillRect(0, 0, 23, sh * 7);
+  g.fillStyle(0xffffff, 1);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) g.fillCircle(2.8 + c * 4.4 + (r % 2) * 2.2, 2.8 + r * 4.6, 0.9);
+}
+
+function drawFlagUK(g) {
+  g.fillStyle(0x012169, 1); g.fillRect(0, 0, 54, 36);
+  g.lineStyle(7, 0xffffff, 1); g.lineBetween(0, 0, 54, 36); g.lineBetween(54, 0, 0, 36);
+  g.lineStyle(2.4, 0xc8102e, 1); g.lineBetween(0, 0, 54, 36); g.lineBetween(54, 0, 0, 36);
+  g.fillStyle(0xffffff, 1); g.fillRect(22, 0, 10, 36); g.fillRect(0, 13, 54, 10);
+  g.fillStyle(0xc8102e, 1); g.fillRect(24, 0, 6, 36); g.fillRect(0, 15, 54, 6);
+}
+
 function drawGunship(g) { // 120×116 대형 공격 헬기 (기수 아래)
   g.fillStyle(0x2f4430, 1); g.fillRoundedRect(55, 2, 10, 50, 4);
   g.fillStyle(0x223322, 1); g.fillRect(40, 2, 40, 7);
@@ -674,6 +805,14 @@ class BootScene extends Phaser.Scene {
     tex('mb_gunship', 120, 116, drawGunship);
     tex('mb_fortress', 200, 124, drawFortress);
     tex('mb_ace', 76, 76, drawAce);
+    tex('pilot_han', 64, 64, drawPilotHan);
+    tex('pilot_claire', 64, 64, drawPilotClaire);
+    tex('pilot_jack', 64, 64, drawPilotJack);
+    tex('pilot_oliver', 64, 64, drawPilotOliver);
+    tex('flag_kr', 54, 36, drawFlagKR);
+    tex('flag_fr', 54, 36, drawFlagFR);
+    tex('flag_us', 54, 36, drawFlagUS);
+    tex('flag_uk', 54, 36, drawFlagUK);
 
     tex('pb', 8, 22, (g) => {
       g.fillStyle(0xffb300, 0.45); g.fillRoundedRect(0, 2, 8, 20, 4);
@@ -790,7 +929,8 @@ class MenuScene extends Phaser.Scene {
     pill.fillStyle(0x000814, 0.55); pill.fillRoundedRect(W / 2 - 130, 318, 260, 70, 18);
     pill.lineStyle(1.5, 0xffd166, 0.5); pill.strokeRoundedRect(W / 2 - 130, 318, 260, 70, 18);
     this.bestLabel = txt(this, W / 2, 340, '', 22, '#ffd166').setDepth(11);
-    this.planeLabel = txt(this, W / 2, 369, '기체  ' + Store.get('plane', 'RAPTOR-X'), 14, '#cfe3ff').setDepth(11);
+    this.planeLabel = txt(this, W / 2, 369, '', 14, '#cfe3ff').setDepth(11);
+    this.planeLabel.setText(getPlane().id + '  ·  ' + getPlane().pilot.name + ' (' + getPlane().pilot.nation + ')');
 
     // 모드 선택
     makeToggle(this, W / 2, 432, 300, 46, [MODES.normal.label, MODES.arcade.label], this.mode === 'arcade' ? 1 : 0, (i) => {
@@ -826,40 +966,57 @@ class MenuScene extends Phaser.Scene {
   openOverlay(c) { c.setVisible(true); setInputEnabled(c, true); }
   closeOverlay(c) { c.setVisible(false); setInputEnabled(c, false); }
 
-  // 기체 선택 창: 4종 카드 중 하나를 눌러 고르고 '확인'
+  // 기체 선택 창: 4종 카드(기체 + 조종사) 중 하나를 눌러 고르고 '확인'
   buildHangar() {
     const W = GAME_W, H = GAME_H;
     const c = this.add.container(0, 0).setDepth(100);
-    const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.85).setOrigin(0).setInteractive();
-    c.add([dim, drawPanel(this, 20, 64, W - 40, 744),
-      txt(this, W / 2, 102, 'HANGAR', 30, '#ffffff'),
-      txt(this, W / 2, 134, '기체를 눌러 선택하세요', 14, '#9ec9ff')]);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.88).setOrigin(0).setInteractive();
+    c.add([dim, drawPanel(this, 16, 40, W - 32, 790),
+      txt(this, W / 2, 74, 'HANGAR', 28, '#ffffff'),
+      txt(this, W / 2, 104, '기체와 조종사를 골라 주세요', 13, '#9ec9ff')]);
 
     let sel = PLANES.indexOf(getPlane());
-    const cw = Math.min(170, (W - 84) / 2), ch = 172;
+    const cw = Math.min(176, (W - 76) / 2), ch = 150;
     const cards = [];
     PLANES.forEach((pl, i) => {
-      const cx = W / 2 + (i % 2 === 0 ? -1 : 1) * (cw / 2 + 6);
-      const cy = 248 + Math.floor(i / 2) * (ch + 12);
+      const cx = W / 2 + (i % 2 === 0 ? -1 : 1) * (cw / 2 + 5);
+      const cy = 200 + Math.floor(i / 2) * (ch + 10);
       const g = this.add.graphics();
-      const img = this.add.image(cx, cy - 24, pl.key);
+      const img = this.add.image(cx + 14, cy - 14, pl.key);
+      const face = this.add.image(cx - cw / 2 + 26, cy - ch / 2 + 26, pl.pilot.face).setScale(0.62);
+      const flag = this.add.image(cx + cw / 2 - 22, cy - ch / 2 + 16, pl.pilot.flag).setScale(0.5);
       const z = this.add.zone(cx, cy, cw, ch).setInteractive({ useHandCursor: true });
       z.on('pointerup', () => { sel = i; Sound.unlock(); Sound.click(); refresh(); });
       cards.push({ g, img, cx, cy });
-      c.add([g, img, txt(this, cx, cy + 44, pl.id, 16, '#ffffff'), txt(this, cx, cy + 66, pl.type, 13, '#ffd166'), z]);
+      c.add([g, img, face, flag,
+        txt(this, cx, cy + 40, pl.id, 15, '#ffffff'),
+        txt(this, cx, cy + 60, pl.pilot.name, 13, '#ffd166'), z]);
     });
 
-    // 선택한 기체 상세
+    // 상세: 조종사 프로필 + 기체 성능
+    const top = 446;
     const box = this.add.graphics();
-    box.fillStyle(0x0b1a2e, 0.7); box.fillRoundedRect(36, 538, W - 72, 180, 14);
-    const dTitle = txt(this, W / 2, 562, '', 18, '#ffffff');
+    box.fillStyle(0x0b1a2e, 0.75); box.fillRoundedRect(30, top, W - 60, 304, 14);
+    const face = this.add.image(78, top + 52, PLANES[sel].pilot.face).setScale(1.1);
+    const ring = this.add.graphics();
+    ring.lineStyle(3, 0xffc93c, 1); ring.strokeCircle(78, top + 52, 36);
+    const pName = this.add.text(126, top + 20, '', { fontFamily: FONT, fontSize: '19px', color: '#ffffff' });
+    const pEn = this.add.text(126, top + 44, '', { fontFamily: FONT, fontSize: '11px', color: '#6f8fb5' });
+    const pFlag = this.add.image(140, top + 72, 'flag_kr').setScale(0.5);
+    const pNation = this.add.text(158, top + 72, '', { fontFamily: FONT, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5);
+    const pRole = txt(this, W / 2, top + 106, '', 13, '#ffd166');
+    const pQuote = txt(this, W / 2, top + 126, '', 13, '#e8f1ff', { fontStyle: 'italic' });
+
+    const line = this.add.graphics();
+    line.lineStyle(1, 0x35567e, 1); line.lineBetween(46, top + 145, W - 46, top + 145);
+    const dTitle = txt(this, W / 2, top + 164, '', 16, '#ffffff');
     const bars = this.add.graphics();
     const statLabels = ['공격력', '속도', '방어력'].map((l, k) =>
-      this.add.text(W / 2 - 105, 596 + k * 26, l, { fontFamily: FONT, fontSize: '14px', color: '#cfe3ff' }).setOrigin(0, 0.5));
-    const dDesc = txt(this, W / 2, 668, '', 14, '#e8f1ff');
-    const dNote = txt(this, W / 2, 687, '', 12, '#9ec9ff');
-    const dBomb = txt(this, W / 2, 705, '', 12, '#ffb3b8');
-    c.add([box, dTitle, bars, dDesc, dNote, dBomb].concat(statLabels));
+      this.add.text(W / 2 - 105, top + 190 + k * 22, l, { fontFamily: FONT, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5));
+    const dDesc = txt(this, W / 2, top + 254, '', 13, '#e8f1ff');
+    const dNote = txt(this, W / 2, top + 272, '', 12, '#9ec9ff');
+    const dBomb = txt(this, W / 2, top + 290, '', 12, '#ffb3b8');
+    c.add([box, face, ring, pName, pEn, pFlag, pNation, pRole, pQuote, line, dTitle, bars, dDesc, dNote, dBomb].concat(statLabels));
 
     const refresh = () => {
       cards.forEach((cd, i) => {
@@ -869,15 +1026,22 @@ class MenuScene extends Phaser.Scene {
         cd.g.fillRoundedRect(cd.cx - cw / 2, cd.cy - ch / 2, cw, ch, 14);
         cd.g.lineStyle(on ? 3 : 1.5, on ? 0xffc93c : 0x35567e, 1);
         cd.g.strokeRoundedRect(cd.cx - cw / 2, cd.cy - ch / 2, cw, ch, 14);
-        cd.img.setScale(on ? 1.4 : 1.1).setAlpha(on ? 1 : 0.75);
+        cd.img.setScale(on ? 1.3 : 1.05).setAlpha(on ? 1 : 0.75);
       });
-      const p = PLANES[sel];
+      const p = PLANES[sel], pi = p.pilot;
+      face.setTexture(pi.face);
+      pName.setText(pi.name + '  ' + pi.age + '세');
+      pEn.setText(pi.en);
+      pFlag.setTexture(pi.flag);
+      pNation.setText(pi.nation);
+      pRole.setText(pi.role);
+      pQuote.setText(pi.quote);
       dTitle.setText(p.id + '  ·  ' + p.type);
       bars.clear();
       [p.atk, p.spd, p.def].forEach((v, k) => {
         for (let n = 0; n < 5; n++) {
           bars.fillStyle(n < v ? 0x5fd3ff : 0x23405f, 1);
-          bars.fillRoundedRect(W / 2 - 35 + n * 24, 590 + k * 26, 20, 12, 3);
+          bars.fillRoundedRect(W / 2 - 35 + n * 24, top + 184 + k * 22, 20, 11, 3);
         }
       });
       dDesc.setText(p.desc);
@@ -886,13 +1050,13 @@ class MenuScene extends Phaser.Scene {
     };
     refresh();
 
-    c.add(makeButton(this, W / 2, 756, 220, 54, '확인', () => {
+    c.add(makeButton(this, W / 2, 780, 220, 52, '이 조종사로 출격', () => {
       const p = PLANES[sel];
       Store.set('plane', p.id);
-      this.planeLabel.setText('기체  ' + p.id);
+      this.planeLabel.setText(p.id + '  ·  ' + p.pilot.name + ' (' + p.pilot.nation + ')');
       this.fly.setTexture(p.key);
       this.closeOverlay(c);
-    }, 'primary', 22));
+    }, 'primary', 20));
     this.closeOverlay(c);
     return c;
   }
@@ -1101,6 +1265,11 @@ class GameScene extends Phaser.Scene {
     this.buildHud();
 
     const banner = txt(this, W / 2, H / 2 - 60, mode === 'arcade' ? 'ARCADE MODE' : 'READY', 34, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(40);
+    const pilotFace = this.add.image(W / 2 - 70, H / 2 + 10, plane.pilot.face).setScale(0.8).setDepth(40);
+    const pilotLine = this.add.text(W / 2 - 38, H / 2 + 10, plane.pilot.name + '\n' + plane.pilot.quote, {
+      fontFamily: FONT, fontSize: '14px', color: '#ffffff', stroke: '#000000', strokeThickness: 4, lineSpacing: 4
+    }).setOrigin(0, 0.5).setDepth(40);
+    this.tweens.add({ targets: [pilotFace, pilotLine], alpha: 0, delay: 2200, duration: 600, onComplete: () => { pilotFace.destroy(); pilotLine.destroy(); } });
     const hint = txt(this, W / 2, H - 150, '게이지가 차면 왼쪽 아래 CHARGE!', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
     this.tweens.add({ targets: [banner, hint], alpha: 0, delay: 2200, duration: 600, onComplete: () => { banner.destroy(); hint.destroy(); } });
   }
