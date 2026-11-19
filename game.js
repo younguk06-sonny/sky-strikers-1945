@@ -18,6 +18,8 @@ if (!window.Phaser) {
 const GAME_H = 844;
 // 폰 화면 비율에 맞춰 가로 폭을 390~480 사이에서 정한다 → 양옆 빈 공간 최소화
 const GAME_W = Math.round(Math.min(480, Math.max(390, GAME_H * (window.innerWidth / Math.max(1, window.innerHeight)))));
+// 화면을 2배 해상도로 그려서 폰에서도 선명하게 (게임 좌표는 그대로, 카메라만 2배 확대)
+const ZOOM = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
 const FONT = "'Russo One', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif";
 
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
@@ -367,7 +369,7 @@ const DROP = { fighter: 0.07, heli: 0.25, bomber: 1, ship: 0.3, tank: 0.12, pity
 
 // 5개 스테이지: 배경·지상(해상) 적·중간보스·최종 보스가 각각 다름
 const STAGES = [
-  { name: 'OCEAN STRIKE',  kr: '바다 위 전투', tile: 'sea',         glint: true,  scenery: 'island',   ground: 'ship', mid: 'gunship',  boss: 'kraken' },
+  { name: 'OCEAN STRIKE',  kr: '바다 위 전투', tile: 'sea',         glint: true,  scenery: null,   ground: 'ship', mid: 'gunship',  boss: 'kraken' },
   { name: 'DESERT STORM',  kr: '사막 기지',    tile: 'tile_desert', glint: false, scenery: 'dune',     ground: 'tank', mid: 'ace',      boss: 'titan' },
   { name: 'CITY DEFENSE',  kr: '도시 방어전',  tile: 'tile_city',   glint: false, scenery: 'building', ground: 'tank', mid: 'fortress', boss: 'ironbird' },
   { name: 'SKY FORTRESS',  kr: '공중 요새',    tile: 'tile_sky',    glint: false, scenery: 'cloud',    ground: null,   mid: 'ace',      boss: 'airship' },
@@ -420,7 +422,7 @@ const BOSSES = {
  * ------------------------------------------------------------------- */
 function txt(scene, x, y, str, size, color, extra) {
   return scene.add.text(x, y, str, Object.assign({
-    fontFamily: FONT, fontSize: size + 'px', color, padding: { x: 2, y: 2 }
+    fontFamily: FONT, resolution: ZOOM, fontSize: size + 'px', color, padding: { x: 2, y: 2 }
   }, extra || {})).setOrigin(0.5);
 }
 
@@ -534,6 +536,97 @@ function drawPanel(scene, x, y, w, h) {
 }
 
 /* ---------------------------------------------------------------------
+ * 움직이는 배경 셰이더 (WebGL): 0 바다 · 1 사막 · 2 도시(타일 사용) · 3 하늘 · 4 최종전
+ * ------------------------------------------------------------------- */
+const BG_FRAG = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform float uT;
+uniform float uMode;
+uniform float uAspect;
+varying vec2 outTexCoord;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
+float fbm3(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 3; i++) { v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
+void main() {
+  vec2 uv = outTexCoord;
+  vec2 p = vec2(uv.x * uAspect, uv.y);
+  vec3 col = vec3(0.3);
+  if (uMode < 0.5) {
+    vec2 q = p * 8.0 + vec2(0.0, uT * 0.57);
+    float w = sin(q.x * 0.9 + q.y * 2.1 + fbm3(q * 0.5) * 3.0 - uT * 1.1);
+    w += sin(-q.x * 1.7 + q.y * 1.3 + fbm3(q * 0.7 + 3.0) * 3.0 - uT * 1.4) * 0.7;
+    w += sin(q.x * 2.9 + q.y * 3.7 + noise(q * 1.5) * 2.0 - uT * 2.0) * 0.4;
+    w /= 2.1;
+    float big = fbm3(q * 0.22 + vec2(uT * 0.03, 0.0));
+    float crest = smoothstep(0.45, 0.95, w);
+    vec3 deep = vec3(0.020, 0.075, 0.140);
+    vec3 mid = vec3(0.050, 0.190, 0.300);
+    vec3 lite = vec3(0.200, 0.420, 0.560);
+    col = mix(deep, mid, smoothstep(-0.6, 0.6, w));
+    col = mix(col, lite, crest * 0.55);
+    col *= 0.70 + 0.55 * big;
+    float foam = crest * smoothstep(0.42, 0.72, noise(q * 5.0 + vec2(0.0, uT * 0.9)));
+    foam += smoothstep(0.80, 0.95, w) * 0.5;
+    col = mix(col, vec3(0.84, 0.92, 0.96), clamp(foam, 0.0, 1.0) * 0.75);
+    float sp = noise(q * 16.0 + vec2(uT * 3.0, uT * 1.3));
+    col += vec3(0.9, 0.95, 1.0) * step(0.93, sp) * crest * 0.6;
+    col *= 0.88 + 0.22 * uv.y;
+  } else if (uMode < 1.5) {
+    vec2 q = p * 2.6 + vec2(0.0, uT * 0.19);
+    float d = fbm(q * 0.8);
+    float rip = sin(q.y * 18.0 + d * 9.0 + q.x * 3.0) * 0.5 + 0.5;
+    float dune = sin(q.y * 3.0 + fbm3(q * 0.5) * 6.0) * 0.5 + 0.5;
+    col = mix(vec3(0.60, 0.43, 0.25), vec3(0.94, 0.80, 0.56), dune * 0.6 + rip * 0.15 + d * 0.3);
+    float rock = smoothstep(0.64, 0.69, fbm3(q * 1.4 + 7.0));
+    col = mix(col, vec3(0.36, 0.28, 0.21), rock * 0.85);
+    col *= 0.88 + 0.16 * rip;
+  } else if (uMode < 2.5) {
+    col = vec3(0.3, 0.32, 0.35);
+  } else if (uMode < 3.5) {
+    vec2 q = p * 1.6 + vec2(0.0, uT * 0.16);
+    vec3 sky = mix(vec3(0.30, 0.55, 0.85), vec3(0.62, 0.80, 0.96), uv.y);
+    float c1 = fbm(q);
+    float c2 = fbm3(q * 2.0 + vec2(5.0, uT * 0.1));
+    float cl = smoothstep(0.46, 0.76, c1 * 0.7 + c2 * 0.3);
+    float sh = smoothstep(0.46, 0.9, fbm3(q + vec2(0.05, -0.07)) * 0.7 + c2 * 0.3);
+    vec3 cloudCol = mix(vec3(1.0), vec3(0.70, 0.76, 0.88), sh * 0.8);
+    col = mix(sky, cloudCol, cl * 0.92);
+  } else {
+    vec2 q = p * 2.0 + vec2(0.0, uT * 0.08);
+    float neb = fbm(q * 1.2 + vec2(uT * 0.02, 0.0));
+    float neb2 = fbm3(q * 2.5 - vec2(0.0, uT * 0.05));
+    col = vec3(0.03, 0.005, 0.05);
+    col += vec3(0.38, 0.04, 0.26) * smoothstep(0.35, 0.85, neb);
+    col += vec3(0.60, 0.08, 0.10) * smoothstep(0.55, 0.95, neb2) * 0.7;
+    vec2 sp = (p + vec2(0.0, uT * 0.05)) * 70.0;
+    vec2 sf = fract(sp) - 0.5;
+    float st = hash(floor(sp));
+    col += vec3(1.0) * smoothstep(0.2, 0.0, length(sf)) * step(0.985, st) * (0.6 + 0.4 * sin(uT * 3.0 + st * 40.0));
+    float crack = 1.0 - smoothstep(0.0, 0.03, abs(neb - 0.55));
+    col += vec3(1.0, 0.25, 0.2) * crack * 0.25;
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function makeBgShader(scene, mode) {
+  if (scene.sys.game.renderer.type !== Phaser.WEBGL || !scene.cache.shader.has('bg')) return null;
+  try {
+    const sh = scene.add.shader('bg', 0, 0, GAME_W, GAME_H).setOrigin(0).setDepth(0.1);
+    sh.setUniform('uMode.value', mode);
+    sh.setUniform('uAspect.value', GAME_W / GAME_H);
+    return sh;
+  } catch (e) { return null; }
+}
+
+/* ---------------------------------------------------------------------
  * 그래픽 그리기 함수 (Boot에서 텍스처로 구워 둔다)
  * ------------------------------------------------------------------- */
 function drawPlayer(g, c) {
@@ -598,6 +691,121 @@ function drawBlaze(g) { // 주황·빨강 공격기
   g.fillStyle(0x1b1b1b, 0.75); g.fillRect(17, 3, 22, 2);
   g.fillStyle(0x1d2f45, 1); g.fillEllipse(28, 22, 7, 11);
   g.fillStyle(0xffb347, 1); g.fillEllipse(27, 20, 2.5, 4);
+}
+
+/* ---------- 제트 전투기 (캔버스 2D, 그라데이션·광택) ---------- */
+function cPoly(x, pts, fill) {
+  x.beginPath(); x.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) x.lineTo(pts[i][0], pts[i][1]);
+  x.closePath(); x.fillStyle = fill; x.fill();
+}
+function cLin(x, x0, y0, x1, y1, stops) {
+  const g = x.createLinearGradient(x0, y0, x1, y1);
+  stops.forEach(([o, c]) => g.addColorStop(o, c));
+  return g;
+}
+const cMirror = (pts, W) => pts.map(([a, b]) => [W - a, b]);
+function cCanopy(x, cx, cy, rx, ry, tint) {
+  x.beginPath(); x.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  x.fillStyle = cLin(x, cx - rx, cy - ry, cx + rx, cy + ry, [[0, tint[0]], [0.45, tint[1]], [1, tint[2]]]); x.fill();
+  x.beginPath(); x.ellipse(cx - rx * 0.35, cy - ry * 0.3, rx * 0.3, ry * 0.4, 0, 0, Math.PI * 2);
+  x.fillStyle = 'rgba(255,255,255,0.85)'; x.fill();
+}
+function cFuselage(x, pts, x0, x1, dark, light) {
+  cPoly(x, pts, cLin(x, x0, 0, x1, 0, [[0, dark], [0.42, light], [0.58, light], [1, dark]]));
+  x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 0.5; x.stroke();
+}
+function cLines(x, segs, a) {
+  x.strokeStyle = 'rgba(0,0,0,' + (a || 0.25) + ')'; x.lineWidth = 0.45; x.beginPath();
+  segs.forEach(([a1, b1, a2, b2]) => { x.moveTo(a1, b1); x.lineTo(a2, b2); }); x.stroke();
+}
+function cNozzle(x, cx, y, w) {
+  x.fillStyle = '#1b1f26'; x.fillRect(cx - w / 2, y, w, 5);
+  x.fillStyle = 'rgba(255,170,80,0.9)'; x.fillRect(cx - w / 2 + 0.7, y + 3.4, w - 1.4, 1.6);
+}
+
+function jetRaptor(x) {        // 56×56 쌍수직꼬리 스텔스기 (파랑)
+  const W = 56;
+  const stab = [[30, 41], [46, 51], [45, 54.5], [31, 52]];
+  const sg = cLin(x, 30, 41, 46, 54, [[0, '#6b88aa'], [1, '#2a3b50']]);
+  cPoly(x, stab, sg); cPoly(x, cMirror(stab, W), sg);
+  const wing = [[28, 14], [53.5, 37], [52.5, 41.5], [33, 41.5], [28, 40], [23, 41.5], [3.5, 41.5], [2.5, 37]];
+  cPoly(x, wing, cLin(x, 6, 14, 50, 42, [[0, '#a9c6e8'], [0.45, '#4f7cb0'], [1, '#22395a']]));
+  x.strokeStyle = 'rgba(255,255,255,0.45)'; x.lineWidth = 0.7; x.beginPath(); x.moveTo(28, 14.5); x.lineTo(53, 37); x.moveTo(28, 14.5); x.lineTo(3, 37); x.stroke();
+  cPoly(x, [[47, 36], [53.5, 37], [52.5, 41.5], [48, 41.5]], '#ffc93c'); cPoly(x, [[9, 36], [2.5, 37], [3.5, 41.5], [8, 41.5]], '#ffc93c');
+  cPoly(x, [[19.5, 35], [22.5, 33], [22, 47], [18.5, 48.5]], '#2b394a'); cPoly(x, cMirror([[19.5, 35], [22.5, 33], [22, 47], [18.5, 48.5]], W), '#2b394a');
+  cFuselage(x, [[28, 1], [31, 8], [33.2, 22], [34.2, 40], [32.5, 52], [23.5, 52], [21.8, 40], [22.8, 22], [25, 8]], 22, 34, '#3a4a5c', '#dfe8f1');
+  cNozzle(x, 25.7, 50, 3.6); cNozzle(x, 30.3, 50, 3.6);
+  cCanopy(x, 28, 17, 2.9, 6.6, ['#fff1b8', '#c98f2c', '#3a2a10']);
+  cLines(x, [[23, 26, 33, 26], [22.5, 33, 33.5, 33], [12, 33, 22, 33], [34, 33, 44, 33]]);
+}
+
+function jetPhantom(x) {       // 56×56 카나드 델타 고속기 (보라·흰색)
+  const W = 56;
+  const wing = [[28, 11], [53, 45], [50, 48], [6, 48], [3, 45]];
+  cPoly(x, wing, cLin(x, 8, 12, 50, 48, [[0, '#e8dcff'], [0.4, '#8a5ce0'], [1, '#3a1f78']]));
+  x.strokeStyle = 'rgba(255,255,255,0.5)'; x.lineWidth = 0.7; x.beginPath(); x.moveTo(28, 11.5); x.lineTo(52.5, 45); x.moveTo(28, 11.5); x.lineTo(3.5, 45); x.stroke();
+  cPoly(x, [[40, 44], [53, 45], [50, 48], [42, 48]], '#5fd3ff'); cPoly(x, [[16, 44], [3, 45], [6, 48], [14, 48]], '#5fd3ff');
+  const can = [[31, 15], [40, 21], [39, 23], [31, 21]];
+  cPoly(x, can, '#6d45c0'); cPoly(x, cMirror(can, W), '#6d45c0');
+  cFuselage(x, [[28, 0.5], [30.5, 7], [32, 20], [32.5, 44], [31, 53], [25, 53], [23.5, 44], [24, 20], [25.5, 7]], 23.5, 32.5, '#4b3a6e', '#f4f0ff');
+  cPoly(x, [[27.2, 30], [28.8, 30], [29.5, 50], [26.5, 50]], '#2a1d48');
+  cNozzle(x, 28, 51, 5);
+  cCanopy(x, 28, 16, 2.4, 6, ['#d8f6ff', '#3fa7d6', '#0b2a40']);
+  cLines(x, [[24, 28, 32, 28], [14, 40, 42, 40]]);
+}
+
+function jetThunder(x) {       // 56×56 쌍발 중장갑 공격기 (위장 녹색)
+  const W = 56;
+  const wing = [[3, 24], [53, 24], [54.5, 27], [53, 33], [3, 33], [1.5, 27]];
+  cPoly(x, wing, cLin(x, 0, 22, 0, 34, [[0, '#a4c27e'], [0.5, '#5d8a3c'], [1, '#2f4a1e']]));
+  x.fillStyle = 'rgba(40,60,25,0.55)'; [[10, 27, 6, 2.5], [40, 29, 7, 2.5], [22, 30, 5, 2]].forEach(([a, b, c, d]) => { x.beginPath(); x.ellipse(a, b, c, d, 0.3, 0, Math.PI * 2); x.fill(); });
+  const tail = [[10, 45], [46, 45], [47, 50], [9, 50]];
+  cPoly(x, tail, cLin(x, 0, 45, 0, 50, [[0, '#7da05a'], [1, '#2f4a1e']]));
+  cPoly(x, [[9, 41], [12, 41], [12.5, 53], [8.5, 53]], '#2f4a1e'); cPoly(x, cMirror([[9, 41], [12, 41], [12.5, 53], [8.5, 53]], W), '#2f4a1e');
+  cFuselage(x, [[28, 2], [31, 7], [33, 20], [33, 44], [31, 52], [25, 52], [23, 44], [23, 20], [25, 7]], 23, 33, '#3c4a30', '#c9d4bc');
+  [[18.5, 33], [37.5, 33]].forEach(([cx, cy]) => {
+    x.beginPath(); x.ellipse(cx, cy + 5, 4.2, 8, 0, 0, Math.PI * 2);
+    x.fillStyle = cLin(x, cx - 4, 0, cx + 4, 0, [[0, '#2b3324'], [0.5, '#9aa58c'], [1, '#2b3324']]); x.fill();
+    x.fillStyle = '#15181c'; x.beginPath(); x.arc(cx, cy - 1.5, 2.6, 0, Math.PI * 2); x.fill();
+  });
+  cNozzle(x, 18.5, 45, 4.2); cNozzle(x, 37.5, 45, 4.2);
+  cCanopy(x, 28, 14, 3.2, 5.5, ['#e6f7ff', '#5aa0c8', '#123045']);
+  x.fillStyle = '#ffffff'; x.beginPath(); x.arc(9, 28.5, 2.4, 0, Math.PI * 2); x.arc(47, 28.5, 2.4, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#e63946'; x.beginPath(); x.arc(9, 28.5, 1.1, 0, Math.PI * 2); x.arc(47, 28.5, 1.1, 0, Math.PI * 2); x.fill();
+  cLines(x, [[23, 22, 33, 22], [23, 36, 33, 36]]);
+}
+
+function jetBlaze(x) {         // 56×56 전진익 공격기 (빨강·검정)
+  const W = 56;
+  const wing = [[31, 26], [49, 19], [53, 22], [52, 26.5], [33, 43]];
+  const wg = cLin(x, 30, 20, 52, 44, [[0, '#ff8a5c'], [0.5, '#c8321e'], [1, '#5a120a']]);
+  cPoly(x, wing, wg); cPoly(x, cMirror(wing, W), wg);
+  cPoly(x, [[46, 20.5], [49, 19], [53, 22], [52, 26.5], [47, 25]], '#1d1f24'); cPoly(x, cMirror([[46, 20.5], [49, 19], [53, 22], [52, 26.5], [47, 25]], W), '#1d1f24');
+  const can = [[31, 13], [39, 18], [38, 20], [31, 19]];
+  cPoly(x, can, '#b02a1a'); cPoly(x, cMirror(can, W), '#b02a1a');
+  const stab = [[31, 46], [42, 52], [41, 55], [31, 53]];
+  cPoly(x, stab, '#2a2d34'); cPoly(x, cMirror(stab, W), '#2a2d34');
+  cFuselage(x, [[28, 0.5], [31, 7], [33, 22], [33.5, 44], [32, 53], [24, 53], [22.5, 44], [23, 22], [25, 7]], 22.5, 33.5, '#1e2228', '#8e98a6');
+  cPoly(x, [[26.5, 24], [29.5, 24], [30.5, 46], [25.5, 46]], '#d9482b');
+  cPoly(x, [[27.2, 24], [28.8, 24], [29.2, 40], [26.8, 40]], '#ffc93c');
+  cNozzle(x, 28, 51, 5.5);
+  cCanopy(x, 28, 15.5, 2.7, 6, ['#ffe6c8', '#e0702c', '#3a1408']);
+}
+
+function jetEnemy(x) {         // 44×44 적 제트기 (아래를 향함, 회색·적색)
+  x.save(); x.translate(22, 22); x.rotate(Math.PI); x.translate(-22, -22);
+  const W = 44;
+  const wing = [[22, 13], [41, 31], [40, 34], [26, 32], [22, 31], [18, 32], [4, 34], [3, 31]];
+  cPoly(x, wing, cLin(x, 4, 13, 40, 34, [[0, '#c9ced6'], [0.5, '#7a8290'], [1, '#353b45']]));
+  cPoly(x, [[36, 29], [41, 31], [40, 34], [36, 33]], '#d23b3b'); cPoly(x, [[8, 29], [3, 31], [4, 34], [8, 33]], '#d23b3b');
+  const st = [[24, 34], [34, 40], [33, 42.5], [24, 41]];
+  cPoly(x, st, '#4a515c'); cPoly(x, cMirror(st, W), '#4a515c');
+  cPoly(x, [[21.2, 28], [22.8, 28], [23, 42], [21, 42]], '#8e1f1f');
+  cFuselage(x, [[22, 1], [24.5, 8], [26, 20], [26, 34], [24.5, 42], [19.5, 42], [18, 34], [18, 20], [19.5, 8]], 18, 26, '#3a3f48', '#d5dae2');
+  cNozzle(x, 22, 40, 4.4);
+  cCanopy(x, 22, 13, 2.3, 5, ['#ffd6d6', '#c03030', '#3a0a0a']);
+  x.restore();
 }
 
 /* ---------- 조종사 얼굴 (64×64) ---------- */
@@ -983,28 +1191,38 @@ class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
 
   create() {
+    // WebGL이면 모든 그림을 2배 크기로 그린 뒤 표시 크기만 원래대로 줄여 선명하게
+    const HD = this.sys.game.renderer.type === Phaser.WEBGL ? 2 : 1;
+    const NO_HD = new Set(['sea', 'glint', 'tile_desert', 'tile_city', 'tile_sky', 'tile_final']);
+    const hdKeys = [];
     const tex = (key, w, h, fn) => {
+      const sc = NO_HD.has(key) ? 1 : HD;
       const g = this.make.graphics({ x: 0, y: 0 }, false);
+      if (sc !== 1) g.scaleCanvas(sc, sc);
       fn(g);
-      g.generateTexture(key, w, h);
+      g.generateTexture(key, w * sc, h * sc);
       g.destroy();
+      if (sc !== 1) hdKeys.push([key, sc]);
+    };
+    // 캔버스 2D로 직접 그리는 텍스처 (그라데이션·글로우용)
+    const ctex = (key, w, h, draw, hd = true) => {
+      const sc = hd ? HD : 1;
+      const c = document.createElement('canvas');
+      c.width = Math.ceil(w * sc); c.height = Math.ceil(h * sc);
+      const x = c.getContext('2d');
+      x.scale(sc, sc);
+      draw(x, w, h);
+      if (this.textures.exists(key)) this.textures.remove(key);
+      this.textures.addCanvas(key, c);
+      if (sc !== 1) hdKeys.push([key, sc]);
     };
     let seed = 11;
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
-    tex('player', 56, 56, (g) => drawPlayer(g, 0x3b78c4));
-    tex('plane_phantom', 56, 56, drawPhantom);
-    tex('plane_thunder', 56, 56, drawThunder);
-    tex('plane_blaze', 56, 56, drawBlaze);
-    tex('laser', 10, 36, (g) => {
-      g.fillStyle(0x5fd3ff, 0.4); g.fillRoundedRect(0, 0, 10, 36, 5);
-      g.fillStyle(0xe6fbff, 1); g.fillRoundedRect(3, 2, 4, 32, 2);
-    });
-    tex('shell', 14, 14, (g) => {
-      g.fillStyle(0xff6a00, 0.45); g.fillCircle(7, 7, 7);
-      g.fillStyle(0xffb347, 1); g.fillCircle(7, 7, 5);
-      g.fillStyle(0xffffff, 1); g.fillCircle(7, 7, 2.5);
-    });
+    ctex('player', 56, 56, jetRaptor);
+    ctex('plane_phantom', 56, 56, jetPhantom);
+    ctex('plane_thunder', 56, 56, jetThunder);
+    ctex('plane_blaze', 56, 56, jetBlaze);
     tex('missile', 8, 22, (g) => {
       g.fillStyle(0xffa63d, 0.9); g.fillEllipse(4, 18, 4, 8);
       g.fillStyle(0x8c99a8, 1); g.fillTriangle(0, 14, 4, 9, 4, 15); g.fillTriangle(8, 14, 4, 9, 4, 15);
@@ -1015,7 +1233,7 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0x7fe3ff, 0.12); g.fillCircle(36, 36, 33);
       g.lineStyle(3, 0x7fe3ff, 0.85); g.strokeCircle(36, 36, 32);
     });
-    tex('e_fighter', 44, 44, drawFighter);
+    ctex('e_fighter', 44, 44, jetEnemy);
     tex('e_heli', 52, 64, drawHeli);
     tex('rotor', 72, 72, drawRotor);
     tex('e_bomber', 128, 88, drawBomber);
@@ -1046,35 +1264,6 @@ class BootScene extends Phaser.Scene {
     tex('flag_us', 54, 36, drawFlagUS);
     tex('flag_uk', 54, 36, drawFlagUK);
 
-    tex('pb', 8, 22, (g) => {
-      g.fillStyle(0xffb300, 0.45); g.fillRoundedRect(0, 2, 8, 20, 4);
-      g.fillStyle(0xfff6b0, 1); g.fillRoundedRect(2, 0, 4, 22, 2);
-    });
-    tex('eb', 14, 14, (g) => {
-      g.fillStyle(0xff2e74, 1); g.fillCircle(7, 7, 7);
-      g.fillStyle(0xffffff, 1); g.fillCircle(7, 7, 3.5);
-    });
-    tex('eb2', 22, 22, (g) => {
-      g.fillStyle(0xff8a00, 0.45); g.fillCircle(11, 11, 11);
-      g.fillStyle(0xffa62e, 1); g.fillCircle(11, 11, 8);
-      g.fillStyle(0xffffff, 1); g.fillCircle(11, 11, 4);
-    });
-    tex('flame', 14, 24, (g) => {
-      g.fillStyle(0xff6a00, 0.55); g.fillEllipse(7, 12, 14, 24);
-      g.fillStyle(0xffc23d, 0.9); g.fillEllipse(7, 10, 9, 16);
-      g.fillStyle(0xfff6d0, 1); g.fillEllipse(7, 8, 4, 8);
-    });
-    tex('flash', 64, 64, (g) => {
-      for (let r = 32; r > 0; r -= 3) { g.fillStyle(0xffffff, 0.08); g.fillCircle(32, 32, r); }
-      g.fillStyle(0xffffff, 0.9); g.fillCircle(32, 32, 6);
-    });
-    tex('spark', 12, 12, (g) => {
-      g.fillStyle(0xffffff, 0.45); g.fillCircle(6, 6, 6);
-      g.fillStyle(0xffffff, 1); g.fillCircle(6, 6, 3);
-    });
-    tex('smoke', 28, 28, (g) => {
-      for (let r = 14; r > 0; r -= 2) { g.fillStyle(0x777777, 0.12); g.fillCircle(14, 14, r); }
-    });
     tex('heart', 22, 20, (g) => {
       g.fillStyle(0xff4d6d, 1); g.fillCircle(6, 7, 6); g.fillCircle(16, 7, 6); g.fillTriangle(0.5, 9, 21.5, 9, 11, 19.5);
       g.fillStyle(0xffffff, 0.6); g.fillCircle(5, 5, 2);
@@ -1096,24 +1285,67 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0x3f8a3a, 1); g.fillEllipse(72, 52, 96, 62);
       g.fillStyle(0x2f6e2c, 1); g.fillEllipse(60, 45, 40, 26); g.fillEllipse(92, 60, 36, 22);
     });
-    tex('cloud', 180, 96, (g) => {
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(50, 56, 30); g.fillCircle(86, 42, 36); g.fillCircle(126, 52, 32);
-      g.fillCircle(152, 64, 22); g.fillCircle(28, 66, 20); g.fillRoundedRect(28, 56, 126, 30, 14);
-    });
 
-    // 아이템 배지 (P: 파워업, B: 폭탄) — 글자가 필요해서 캔버스로 그림
-    const mkItem = (key, letter, c1, c2) => {
-      const it = this.textures.createCanvas(key, 34, 34);
-      const x = it.getContext();
-      const rg = x.createRadialGradient(13, 11, 3, 17, 17, 17);
-      rg.addColorStop(0, c1); rg.addColorStop(1, c2);
-      x.fillStyle = rg; x.beginPath(); x.arc(17, 17, 15, 0, Math.PI * 2); x.fill();
-      x.lineWidth = 2.5; x.strokeStyle = '#ffffff'; x.stroke();
-      x.fillStyle = '#ffffff'; x.font = 'bold 19px Arial, sans-serif';
-      x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(letter, 17, 18);
-      it.refresh();
+    // ---------- 글로우 텍스처 (캔버스 그라데이션) ----------
+    const radial = (x, cx, cy, r, stops) => {
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+      stops.forEach(([o, c]) => g.addColorStop(o, c));
+      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
     };
+    ctex('eb', 18, 18, (x) => radial(x, 9, 9, 9, [[0, '#ffffff'], [0.32, '#ffe1ec'], [0.5, '#ff4f8b'], [0.78, 'rgba(255,40,110,0.55)'], [1, 'rgba(255,40,110,0)']]));
+    ctex('eb2', 26, 26, (x) => radial(x, 13, 13, 13, [[0, '#ffffff'], [0.3, '#fff0c8'], [0.5, '#ffa62e'], [0.78, 'rgba(255,120,0,0.5)'], [1, 'rgba(255,120,0,0)']]));
+    ctex('pb', 10, 30, (x) => {
+      const g = x.createLinearGradient(0, 0, 10, 0);
+      g.addColorStop(0, 'rgba(255,170,30,0)'); g.addColorStop(0.32, 'rgba(255,190,60,0.55)');
+      g.addColorStop(0.5, '#ffffff'); g.addColorStop(0.68, 'rgba(255,190,60,0.55)'); g.addColorStop(1, 'rgba(255,170,30,0)');
+      x.fillStyle = g; x.beginPath(); x.ellipse(5, 15, 5, 15, 0, 0, Math.PI * 2); x.fill();
+      const v = x.createLinearGradient(0, 0, 0, 30);
+      v.addColorStop(0, 'rgba(255,255,255,0)'); v.addColorStop(0.25, 'rgba(255,255,255,0.9)'); v.addColorStop(1, 'rgba(255,220,120,0)');
+      x.fillStyle = v; x.fillRect(4, 0, 2, 30);
+    });
+    ctex('laser', 14, 40, (x) => {
+      const g = x.createLinearGradient(0, 0, 14, 0);
+      g.addColorStop(0, 'rgba(60,190,255,0)'); g.addColorStop(0.25, 'rgba(80,200,255,0.6)');
+      g.addColorStop(0.5, '#f2fdff'); g.addColorStop(0.75, 'rgba(80,200,255,0.6)'); g.addColorStop(1, 'rgba(60,190,255,0)');
+      x.fillStyle = g; x.beginPath(); x.ellipse(7, 20, 7, 20, 0, 0, Math.PI * 2); x.fill();
+    });
+    ctex('shell', 18, 18, (x) => radial(x, 9, 9, 9, [[0, '#ffffff'], [0.3, '#ffe2a8'], [0.55, '#ff8a2a'], [1, 'rgba(255,90,20,0)']]));
+    ctex('flame', 16, 30, (x) => {
+      const g = x.createLinearGradient(0, 0, 0, 30);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(160,230,255,0.95)');
+      g.addColorStop(0.6, 'rgba(80,140,255,0.6)'); g.addColorStop(1, 'rgba(60,80,255,0)');
+      x.fillStyle = g; x.beginPath(); x.ellipse(8, 15, 6, 15, 0, 0, Math.PI * 2); x.fill();
+      radial(x, 8, 6, 6, [[0, 'rgba(255,255,255,0.9)'], [1, 'rgba(255,255,255,0)']]);
+    });
+    ctex('flash', 64, 64, (x) => radial(x, 32, 32, 32, [[0, 'rgba(255,255,255,1)'], [0.2, 'rgba(255,246,200,0.95)'], [0.45, 'rgba(255,170,60,0.6)'], [0.75, 'rgba(255,80,20,0.2)'], [1, 'rgba(255,60,0,0)']]));
+    ctex('ring', 128, 128, (x) => radial(x, 64, 64, 64, [[0, 'rgba(255,220,150,0)'], [0.62, 'rgba(255,220,150,0)'], [0.8, 'rgba(255,240,200,0.85)'], [0.9, 'rgba(255,160,80,0.4)'], [1, 'rgba(255,120,40,0)']]));
+    ctex('spark', 12, 12, (x) => radial(x, 6, 6, 6, [[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,0.7)'], [1, 'rgba(255,255,255,0)']]), false);
+    ctex('smoke', 32, 32, (x) => radial(x, 16, 16, 16, [[0, 'rgba(90,90,95,0.55)'], [0.6, 'rgba(70,70,75,0.3)'], [1, 'rgba(60,60,65,0)']]), false);
+    ctex('cloud', 240, 140, (x) => {     // 부드러운 뭉게구름 (아래쪽은 살짝 그늘)
+      [[70, 80, 46], [118, 60, 56], [170, 74, 48], [200, 92, 34], [42, 96, 32], [120, 96, 50]].forEach(([cx, cy, r]) =>
+        radial(x, cx, cy, r, [[0, 'rgba(255,255,255,0.95)'], [0.65, 'rgba(240,245,250,0.75)'], [1, 'rgba(230,236,245,0)']]));
+      x.globalCompositeOperation = 'source-atop';
+      const g = x.createLinearGradient(0, 40, 0, 140);
+      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(120,135,160,0.45)');
+      x.fillStyle = g; x.fillRect(0, 0, 240, 140);
+      x.globalCompositeOperation = 'source-over';
+    }, false);
+    ctex('vignette', 200, 400, (x) => {
+      const g = x.createRadialGradient(100, 200, 60, 100, 200, 230);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.7, 'rgba(0,5,15,0.25)'); g.addColorStop(1, 'rgba(0,5,15,0.75)');
+      x.fillStyle = g; x.fillRect(0, 0, 200, 400);
+    }, false);
+
+    // 아이템 배지 (P: 파워업, B: 폭탄)
+    const mkItem = (key, letter, c1, c2) => ctex(key, 34, 34, (x) => {
+      radial(x, 17, 17, 17, [[0, 'rgba(255,255,255,0.5)'], [1, 'rgba(255,255,255,0)']]);
+      const rg = x.createRadialGradient(13, 11, 3, 17, 17, 15);
+      rg.addColorStop(0, c1); rg.addColorStop(1, c2);
+      x.fillStyle = rg; x.beginPath(); x.arc(17, 17, 13.5, 0, Math.PI * 2); x.fill();
+      x.lineWidth = 2.2; x.strokeStyle = '#ffffff'; x.stroke();
+      x.fillStyle = '#ffffff'; x.font = 'bold 18px Arial, sans-serif';
+      x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(letter, 17, 18);
+    });
     mkItem('item_p', 'P', '#ffb0a8', '#c81d25');
     mkItem('item_b', 'B', '#b4dcff', '#1d5fc8');
 
@@ -1124,6 +1356,53 @@ class BootScene extends Phaser.Scene {
     gr.addColorStop(1, 'rgba(0,8,20,0)');
     ctx.fillStyle = gr; ctx.fillRect(0, 0, 4, 256);
     ct.refresh();
+
+    // ---------- 명암·광택 패스: 기체·적·보스에 입체감 ----------
+    const SHADE = ['e_heli', 'e_bomber',
+      'mb_gunship', 'mb_fortress', 'mb_ace', 'b_kraken', 'b_titan', 'b_ironbird', 'b_airship', 'b_omega',
+      'g_ship', 'g_tank', 'g_turret', 'missile', 'island', 'building', 'dune', 'debris'];
+    SHADE.forEach((key) => {
+      if (!this.textures.exists(key)) return;
+      const src = this.textures.get(key).getSourceImage();
+      const Wd = src.width, Hd = src.height;
+      const c = document.createElement('canvas');
+      c.width = Wd; c.height = Hd;
+      const x = c.getContext('2d');
+      x.shadowColor = 'rgba(0,0,0,0.6)'; x.shadowBlur = Math.max(2, Wd * 0.025);
+      x.drawImage(src, 0, 0);
+      x.shadowBlur = 0; x.shadowColor = 'rgba(0,0,0,0)';
+      x.globalCompositeOperation = 'source-atop';
+      const lg = x.createLinearGradient(0, 0, Wd, Hd);                 // 왼쪽 위에서 비추는 빛
+      lg.addColorStop(0, 'rgba(255,255,255,0.32)'); lg.addColorStop(0.45, 'rgba(255,255,255,0)');
+      lg.addColorStop(1, 'rgba(0,0,0,0.42)');
+      x.fillStyle = lg; x.fillRect(0, 0, Wd, Hd);
+      const sg = x.createRadialGradient(Wd * 0.38, Hd * 0.3, 0, Wd * 0.38, Hd * 0.3, Math.max(Wd, Hd) * 0.45);
+      sg.addColorStop(0, 'rgba(255,255,255,0.22)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = sg; x.fillRect(0, 0, Wd, Hd);
+      x.globalCompositeOperation = 'source-over';
+      this.textures.remove(key);
+      this.textures.addCanvas(key, c);
+    });
+
+    // 2배로 그린 텍스처는 표시 크기만 원래대로 (UV는 전체 그대로 → 선명)
+    hdKeys.forEach(([key, sc]) => {
+      const f = this.textures.get(key).get();
+      const w = f.width / sc, h = f.height / sc;
+      f.cutWidth = w; f.cutHeight = h; f.width = w; f.height = h;
+      f.halfWidth = w / 2; f.halfHeight = h / 2; f.centerX = Math.floor(w / 2); f.centerY = Math.floor(h / 2);
+      f.data.cut.w = w; f.data.cut.h = h;
+      f.data.sourceSize.w = w; f.data.sourceSize.h = h;
+      f.data.spriteSourceSize.w = w; f.data.spriteSourceSize.h = h;
+      f.data.radius = 0.5 * Math.sqrt(w * w + h * h);
+    });
+
+    if (HD > 1) {
+      try {
+        this.cache.shader.add('bg', new Phaser.Display.BaseShader('bg', BG_FRAG, undefined, {
+          uT: { type: '1f', value: 0 }, uMode: { type: '1f', value: 0 }, uAspect: { type: '1f', value: GAME_W / GAME_H }
+        }));
+      } catch (e) { /* 셰이더를 못 쓰면 타일 배경 */ }
+    }
 
     const msg = document.getElementById('boot-msg');
     if (msg) msg.remove();
@@ -1139,10 +1418,14 @@ class MenuScene extends Phaser.Scene {
 
   create() {
     const W = GAME_W, H = GAME_H;
+    this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
 
-    // 배경
+    // 배경 (WebGL이면 움직이는 셰이더 바다, 아니면 타일)
     this.sea = this.add.tileSprite(0, 0, W, H, 'sea').setOrigin(0);
     this.glint = this.add.tileSprite(0, 0, W, H, 'glint').setOrigin(0);
+    this.bg = makeBgShader(this, 0);
+    if (this.bg) { this.sea.setVisible(false); this.glint.setVisible(false); }
+    this.bgT = 0;
     this.island = this.add.image(randInt(60, W - 60), randInt(100, H - 200), 'island').setScale(1.2);
     this.clouds = [];
     for (let i = 0; i < 5; i++) {
@@ -1151,7 +1434,8 @@ class MenuScene extends Phaser.Scene {
       this.clouds.push(c);
     }
     this.fly = this.add.image(W * 0.3, H + 80, getPlane().key).setDepth(5).setScale(1.15);
-    this.flyFlame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(4).setScale(1.15);
+    this.flyFlame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(4).setScale(1.15).setBlendMode(Phaser.BlendModes.ADD);
+    this.flyShadow = this.add.image(0, 0, getPlane().key).setTintFill(0x000000).setAlpha(0.28).setScale(1.0).setDepth(2);
     this.flyEnemies = [];
     for (let i = 0; i < 3; i++) this.flyEnemies.push(this.add.image(70 + i * 125, -80 - i * 170, 'e_fighter').setDepth(5));
     this.add.image(0, 0, 'vgrad').setOrigin(0).setDisplaySize(W, 430).setDepth(8);
@@ -1247,10 +1531,10 @@ class MenuScene extends Phaser.Scene {
     const face = this.add.image(78, top + 52, PLANES[sel].pilot.face).setScale(1.1);
     const ring = this.add.graphics();
     ring.lineStyle(3, 0xffc93c, 1); ring.strokeCircle(78, top + 52, 36);
-    const pName = this.add.text(126, top + 20, '', { fontFamily: FONT, fontSize: '19px', color: '#ffffff' });
-    const pEn = this.add.text(126, top + 44, '', { fontFamily: FONT, fontSize: '11px', color: '#6f8fb5' });
+    const pName = this.add.text(126, top + 20, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '19px', color: '#ffffff' });
+    const pEn = this.add.text(126, top + 44, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '11px', color: '#6f8fb5' });
     const pFlag = this.add.image(140, top + 72, 'flag_kr').setScale(0.5);
-    const pNation = this.add.text(158, top + 72, '', { fontFamily: FONT, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5);
+    const pNation = this.add.text(158, top + 72, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5);
     const pRole = txt(this, W / 2, top + 106, '', 13, '#ffd166');
     const pQuote = txt(this, W / 2, top + 126, '', 13, '#e8f1ff', { fontStyle: 'italic' });
 
@@ -1259,7 +1543,7 @@ class MenuScene extends Phaser.Scene {
     const dTitle = txt(this, W / 2, top + 164, '', 16, '#ffffff');
     const bars = this.add.graphics();
     const statLabels = ['공격력', '속도', '방어력'].map((l, k) =>
-      this.add.text(W / 2 - 105, top + 190 + k * 22, l, { fontFamily: FONT, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5));
+      this.add.text(W / 2 - 105, top + 190 + k * 22, l, { fontFamily: FONT, resolution: ZOOM, fontSize: '13px', color: '#cfe3ff' }).setOrigin(0, 0.5));
     const dDesc = txt(this, W / 2, top + 254, '', 13, '#e8f1ff');
     const dNote = txt(this, W / 2, top + 272, '', 12, '#9ec9ff');
     const dBomb = txt(this, W / 2, top + 290, '', 12, '#ffb3b8');
@@ -1325,9 +1609,9 @@ class MenuScene extends Phaser.Scene {
     for (let i = 0; i < Ranking.LIMIT; i++) {
       const y = 240 + i * 30;
       const rk = txt(this, 58, y, '', 16, '#cfe3ff');
-      const nick = this.add.text(84, y, '', { fontFamily: FONT, fontSize: '15px', color: '#ffffff' }).setOrigin(0, 0.5);
-      const sc = this.add.text(W - 52, y, '', { fontFamily: FONT, fontSize: '17px', color: '#ffffff' }).setOrigin(1, 0.5);
-      const tag = this.add.text(0, y, '', { fontFamily: FONT, fontSize: '11px', color: '#9ec9ff' }).setOrigin(1, 0.5);
+      const nick = this.add.text(84, y, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '15px', color: '#ffffff' }).setOrigin(0, 0.5);
+      const sc = this.add.text(W - 52, y, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '17px', color: '#ffffff' }).setOrigin(1, 0.5);
+      const tag = this.add.text(0, y, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '11px', color: '#9ec9ff' }).setOrigin(1, 0.5);
       c.add([rk, nick, sc, tag]);
       this.rankRows.push({ rk, nick, sc, tag });
     }
@@ -1376,6 +1660,9 @@ class MenuScene extends Phaser.Scene {
     const W = GAME_W, H = GAME_H;
     this.sea.tilePositionY -= 40 * dt;
     this.glint.tilePositionY -= 60 * dt;
+    this.bgT += dt;
+    if (this.bg) this.bg.setUniform('uT.value', this.bgT * 0.7);
+    if (this.flyShadow) this.flyShadow.setPosition(this.fly.x + 20, this.fly.y + 30).setTexture(this.fly.texture.key);
     this.island.y += 40 * dt;
     if (this.island.y > H + 80) { this.island.y = -80; this.island.x = randInt(60, W - 60); }
     this.clouds.forEach((c) => {
@@ -1400,6 +1687,7 @@ class GameScene extends Phaser.Scene {
 
   create() {
     const W = GAME_W, H = GAME_H;
+    this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
     const mode = getMode();
     const plane = (this.plane = getPlane());
 
@@ -1450,15 +1738,38 @@ class GameScene extends Phaser.Scene {
     // ---- 배경 ----
     this.sea = this.add.tileSprite(0, 0, W, H, STAGES[0].tile).setOrigin(0).setDepth(0);
     this.glint = this.add.tileSprite(0, 0, W, H, 'glint').setOrigin(0).setDepth(0.5);
+    this.bg = makeBgShader(this, 0);
+    this.bgT = 0;
+    this.hiCloudT = 4;
+    if (this.bg) {
+      this.time.delayedCall(4000, () => {
+        if (this.bg && this.game.loop.actualFps < 40) {
+          this.bg.destroy(); this.bg = null;
+          const st = STAGES[this.stageIdx];
+          this.sea.setTexture(st.tile).setVisible(true);
+          this.glint.setVisible(!!st.glint);
+        }
+      });
+    }
+    this.add.image(0, 0, 'vignette').setOrigin(0).setDisplaySize(W, H).setDepth(44).setAlpha(0.7);
     this.scenery = this.add.group();
     this.spawnScenery(randInt(80, H - 300));
+    if (this.bg) { this.sea.setVisible(false); this.glint.setVisible(false); }
     for (let i = 0; i < 3; i++) this.spawnCloud(randInt(0, H));
 
     // ---- 플레이어 ----
-    this.player = this.physics.add.sprite(W / 2, H - 170, plane.key).setDepth(10);
+    this.player = this.physics.add.sprite(W / 2, H - 170, plane.key).setDepth(10).setScale(1.15);
     this.player.body.moves = false;
     this.player.body.setCircle(7, 21, 15);   // 판정은 조종석 주변의 작은 원
-    this.flame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(9);
+    this.flame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
+    this.playerShadow = this.add.image(0, 0, plane.key).setTintFill(0x000000).setAlpha(0.3).setScale(0.95).setDepth(1.6);
+    // 엔진 불꽃 꼬리
+    this.trail = this.add.particles(0, 0, 'spark', {
+      follow: this.player, followOffset: { x: 0, y: 32 },
+      speedY: { min: 160, max: 260 }, speedX: { min: -18, max: 18 }, lifespan: 230,
+      scale: { start: 0.9, end: 0 }, alpha: { start: 0.85, end: 0 },
+      tint: [0x9fdcff, 0xffffff, 0x6fb8ff], blendMode: 'ADD', frequency: 18
+    }).setDepth(8.5);
     this.muzzle = this.add.image(0, 0, 'flash').setDepth(11).setScale(0.3)
       .setTint(0xffe27a).setBlendMode(Phaser.BlendModes.ADD).setVisible(false);
     this.shield = this.add.image(0, 0, 'shield').setDepth(11).setVisible(false);
@@ -1471,6 +1782,10 @@ class GameScene extends Phaser.Scene {
     this.enemies = this.physics.add.group();
 
     // ---- 파티클 ----
+    this.fxDebris = this.add.particles(0, 0, 'spark', {
+      speed: { min: 120, max: 420 }, lifespan: { min: 300, max: 750 }, gravityY: 260,
+      scale: { start: 0.65, end: 0 }, tint: [0xffd27a, 0xff8a3d, 0xffffff], blendMode: 'ADD', emitting: false
+    }).setDepth(14);
     this.fxFire = this.add.particles(0, 0, 'spark', {
       speed: { min: 50, max: 260 }, lifespan: { min: 250, max: 650 },
       scale: { start: 1.3, end: 0 }, tint: [0xffffff, 0xffe066, 0xff9a2e, 0xff5a1f],
@@ -1522,7 +1837,7 @@ class GameScene extends Phaser.Scene {
     const banner = txt(this, W / 2, H / 2 - 160, mode === 'arcade' ? 'ARCADE MODE' : 'NORMAL MODE', 16, '#9ec9ff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
     const pilotFace = this.add.image(W / 2 - 70, H / 2 + 10, plane.pilot.face).setScale(0.8).setDepth(40);
     const pilotLine = this.add.text(W / 2 - 38, H / 2 + 10, plane.pilot.name + '\n' + plane.pilot.quote, {
-      fontFamily: FONT, fontSize: '14px', color: '#ffffff', stroke: '#000000', strokeThickness: 4, lineSpacing: 4
+      fontFamily: FONT, resolution: ZOOM, fontSize: '14px', color: '#ffffff', stroke: '#000000', strokeThickness: 4, lineSpacing: 4
     }).setOrigin(0, 0.5).setDepth(40);
     this.tweens.add({ targets: [pilotFace, pilotLine], alpha: 0, delay: 2200, duration: 600, onComplete: () => { pilotFace.destroy(); pilotLine.destroy(); } });
     const hint = txt(this, W / 2, H - 150, 'P를 모으면 파워업 (최대 7단계)', 16, '#ffffff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
@@ -1533,13 +1848,13 @@ class GameScene extends Phaser.Scene {
   buildHud() {
     const W = GAME_W, H = GAME_H, s = this.state;
     this.add.image(0, 0, 'vgrad').setOrigin(0).setDisplaySize(W, 110).setDepth(49);
-    this.add.text(16, 12, 'SCORE', { fontFamily: FONT, fontSize: '13px', color: '#9ec9ff' }).setDepth(50);
+    this.add.text(16, 12, 'SCORE', { fontFamily: FONT, resolution: ZOOM, fontSize: '13px', color: '#9ec9ff' }).setDepth(50);
     this.scoreText = this.add.text(16, 28, '0', {
-      fontFamily: FONT, fontSize: '26px', color: '#ffffff', stroke: '#000000', strokeThickness: 3
+      fontFamily: FONT, resolution: ZOOM, fontSize: '26px', color: '#ffffff', stroke: '#000000', strokeThickness: 3
     }).setDepth(50);
-    this.add.text(16, 62, 'BEST ' + fmt(s.best), { fontFamily: FONT, fontSize: '13px', color: '#ffd166' }).setDepth(50);
+    this.add.text(16, 62, 'BEST ' + fmt(s.best), { fontFamily: FONT, resolution: ZOOM, fontSize: '13px', color: '#ffd166' }).setDepth(50);
     this.stageLabel = txt(this, W / 2, 22, 'STAGE 1', 14, '#cfe3ff', { stroke: '#000000', strokeThickness: 3 }).setDepth(50);
-    this.add.text(16, 80, 'POWER', { fontFamily: FONT, fontSize: '11px', color: '#ff9a9a' }).setDepth(50);
+    this.add.text(16, 80, 'POWER', { fontFamily: FONT, resolution: ZOOM, fontSize: '11px', color: '#ff9a9a' }).setDepth(50);
     this.powerGfx = this.add.graphics().setDepth(50);
     this.updatePowerUi();
 
@@ -1553,7 +1868,7 @@ class GameScene extends Phaser.Scene {
       this.lifeIcons.push(icon.setDepth(50));
     }
     if (s.mode === 'arcade') {
-      this.creditText = this.add.text(W - 16, 64, '', { fontFamily: FONT, fontSize: '12px', color: '#9ec9ff' }).setOrigin(1, 0).setDepth(50);
+      this.creditText = this.add.text(W - 16, 64, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '12px', color: '#9ec9ff' }).setOrigin(1, 0).setDepth(50);
     }
     this.updateLifeUi();
 
@@ -1595,7 +1910,7 @@ class GameScene extends Phaser.Scene {
     // 중간보스 체력바 (화면 위쪽)
     this.bossBar = this.add.container(0, 0).setDepth(55).setVisible(false);
     this.bossBarGfx = this.add.graphics();
-    this.bossBarName = this.add.text(20, 102, '', { fontFamily: FONT, fontSize: '13px', color: '#ffb3b8', stroke: '#000000', strokeThickness: 3 });
+    this.bossBarName = this.add.text(20, 102, '', { fontFamily: FONT, resolution: ZOOM, fontSize: '13px', color: '#ffb3b8', stroke: '#000000', strokeThickness: 3 });
     this.bossBar.add([this.bossBarGfx, this.bossBarName]);
 
     this.comboText = txt(this, W / 2, 168, '', 30, '#ffe066', { stroke: '#3a1d00', strokeThickness: 6 }).setDepth(45).setAlpha(0);
@@ -1655,25 +1970,26 @@ class GameScene extends Phaser.Scene {
   onPointerDown(p, over) {
     if (over && over.length) return;          // 버튼 위 터치는 이동으로 쓰지 않음
     if (this.state.over || this.state.frozen) return;
-    this.drag = { id: p.id, px: p.x, py: p.y, sx: this.target.x, sy: this.target.y };
+    this.drag = { id: p.id, px: p.x / ZOOM, py: p.y / ZOOM, sx: this.target.x, sy: this.target.y };
   }
 
   onPointerMove(p) {
     const s = this.state;
     // 재출격 후에도 손가락을 떼지 않고 계속 움직이면 바로 이어서 조작
     if (!this.drag && p.isDown && !s.dead && !s.over && !s.frozen) {
-      this.drag = { id: p.id, px: p.x, py: p.y, sx: this.target.x, sy: this.target.y };
+      this.drag = { id: p.id, px: p.x / ZOOM, py: p.y / ZOOM, sx: this.target.x, sy: this.target.y };
       return;
     }
     const d = this.drag;
     if (!d || p.id !== d.id || s.over || s.dead) return;
     const SENS = Sens.value();
-    const rawX = d.sx + (p.x - d.px) * SENS;
-    const rawY = d.sy + (p.y - d.py) * SENS;
+    const px = p.x / ZOOM, py = p.y / ZOOM;
+    const rawX = d.sx + (px - d.px) * SENS;
+    const rawY = d.sy + (py - d.py) * SENS;
     this.target.x = rawX; this.target.y = rawY;
     this.clampTarget();
-    if (this.target.x !== rawX) { d.sx = this.target.x; d.px = p.x; }
-    if (this.target.y !== rawY) { d.sy = this.target.y; d.py = p.y; }
+    if (this.target.x !== rawX) { d.sx = this.target.x; d.px = px; }
+    if (this.target.y !== rawY) { d.sy = this.target.y; d.py = py; }
   }
 
   onPointerUp(p) {
@@ -1721,6 +2037,10 @@ class GameScene extends Phaser.Scene {
     const H = GAME_H;
     this.sea.tilePositionY -= 60 * dt;
     this.glint.tilePositionY -= 85 * dt;
+    this.bgT += dt;
+    if (this.bg) this.bg.setUniform('uT.value', this.bgT);
+    this.hiCloudT -= dt;
+    if (this.hiCloudT <= 0) { this.hiCloudT = rand(5, 9); this.spawnCloud(-90, true); }
     this.scenery.getChildren().slice().forEach((o) => {
       o.y += o.speed * dt;
       if (o.y > H + 160) o.destroy();
@@ -1738,6 +2058,7 @@ class GameScene extends Phaser.Scene {
   // 스테이지별 지형 (섬·모래언덕·빌딩·뭉게구름·잔해)
   spawnScenery(y) {
     const key = STAGES[this.stageIdx].scenery;
+    if (!key) return;
     const img = this.add.image(randInt(30, GAME_W - 30), y, key).setDepth(1);
     img.speed = 60;
     if (key === 'cloud') { img.setAlpha(0.6).setScale(rand(1.6, 2.6)); img.speed = rand(90, 120); }
@@ -1746,11 +2067,13 @@ class GameScene extends Phaser.Scene {
     this.scenery.add(img);
   }
 
-  spawnCloud(y) {
+  // high = 기체보다 위를 빠르게 지나가는 옅은 구름 (깊이감)
+  spawnCloud(y, high) {
     const img = this.add.image(randInt(-40, GAME_W + 40), y, 'cloud')
-      .setDepth(3).setAlpha(0.28).setScale(rand(0.9, 1.8));
+      .setDepth(high ? 21 : 3).setAlpha(high ? 0.18 : 0.5).setScale(high ? rand(1.6, 2.4) : rand(0.8, 1.5));
     if (this.stageIdx === 4) img.setTint(0x664466);
-    img.speed = randInt(120, 170);
+    else img.setBlendMode(Phaser.BlendModes.SCREEN);
+    img.speed = high ? randInt(230, 290) : randInt(120, 170);
     this.scenery.add(img);
   }
 
@@ -1758,6 +2081,13 @@ class GameScene extends Phaser.Scene {
     const st = STAGES[this.stageIdx];
     this.sea.setTexture(st.tile);
     this.glint.setVisible(!!st.glint);
+    if (this.bg) {
+      const m = { sea: 0, tile_desert: 1, tile_city: 2, tile_sky: 3, tile_final: 4 }[st.tile];
+      this.bg.setUniform('uMode.value', m);
+      this.bg.setVisible(m !== 2);
+      this.sea.setVisible(m === 2);
+      this.glint.setVisible(false);
+    }
     this.scenery.clear(true, true);
     this.spawnScenery(randInt(120, GAME_H - 300));
     this.spawnScenery(randInt(-60, 100));
@@ -1792,7 +2122,8 @@ class GameScene extends Phaser.Scene {
     const tilt = clamp((p.x - prevX) / Math.max(dt, 0.001) * 0.0006, -0.22, 0.22);
     p.rotation += (tilt - p.rotation) * 0.2;
 
-    this.flame.setPosition(p.x - Math.sin(p.rotation) * 26, p.y + Math.cos(p.rotation) * 26)
+    this.playerShadow.setPosition(p.x + 18, p.y + 28).setRotation(p.rotation);
+    this.flame.setPosition(p.x - Math.sin(p.rotation) * 30, p.y + Math.cos(p.rotation) * 30)
       .setRotation(p.rotation).setScale(0.9 + Math.random() * 0.2, 0.8 + Math.random() * 0.55);
 
     if (!this.shieldBreaking) {
@@ -1945,7 +2276,7 @@ class GameScene extends Phaser.Scene {
     if (!b) return;
     b.setTexture(o.kind === 'pb' ? 'pb' : o.kind);
     b.enableBody(true, x, y, true, true);
-    b.setDepth(8).setScale(o.scale || 1);
+    b.setDepth(8).setScale(o.scale || 1).setBlendMode(o.kind === 'missile' ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD);
     b.kind = o.kind;
     b.dmg = o.dmg;
     b.pierce = !!o.pierce;
@@ -1985,7 +2316,7 @@ class GameScene extends Phaser.Scene {
     b.setTexture(key);
     b.enableBody(true, x, y, true, true);
     b.setDepth(12);
-    const half = big ? 11 : 7, r = big ? 6 : 4;
+    const half = big ? 13 : 9, r = big ? 6 : 4;
     b.body.setCircle(r, half - r, half - r);
     this.physics.velocityFromRotation(angle, speed * this.bulletMul(), b.body.velocity);
   }
@@ -2361,6 +2692,7 @@ class GameScene extends Phaser.Scene {
       cdA: 1.2, cdB: 2.2, cdC: 0, spiralLeft: 0, spiralAng: 0, dest: null, destT: 0, burst: 0, burstCd: 0
     });
     if (kind === 'gunship') e.rotor = this.add.image(e.x, e.y, 'rotor').setScale(1.9).setDepth(6);
+    this.addShadow(e, true);
     this.midBoss = e;
     this.bossBarName.setText('중간보스 · ' + def.name);
     this.bossBar.setVisible(true);
@@ -2579,6 +2911,7 @@ class GameScene extends Phaser.Scene {
       t: 0, entered: false, mode: 'enter', targetY: def.y, maxLife: Infinity, phase: 1,
       pat: def.phases.map((ph) => ph.map(() => ({ cd: rand(0.8, 1.6), t: 0, on: true, ang: Math.random() * 6 })))
     });
+    this.addShadow(e, true);
     this.stageBoss = e;
     this.bossBarName.setText('STAGE BOSS · ' + def.name);
     this.bossBar.setVisible(true);
@@ -2685,7 +3018,7 @@ class GameScene extends Phaser.Scene {
       txt(this, W / 2, H / 2 - 140, 'STAGE ' + (this.stageIdx + 1) + ' CLEAR!', 38, '#ffe066', { stroke: '#3a1d00', strokeThickness: 7 }),
       txt(this, W / 2, H / 2 - 96, 'BOSS BONUS  +' + fmt(bonus), 18, '#ffffff', { stroke: '#000000', strokeThickness: 4 }),
       this.add.image(W / 2 - 100, H / 2 - 30, pl.face).setScale(0.85),
-      this.add.text(W / 2 - 66, H / 2 - 30, pl.name + '\n' + pl.quote, { fontFamily: FONT, fontSize: '14px', color: '#ffffff', lineSpacing: 4 }).setOrigin(0, 0.5)
+      this.add.text(W / 2 - 66, H / 2 - 30, pl.name + '\n' + pl.quote, { fontFamily: FONT, resolution: ZOOM, fontSize: '14px', color: '#ffffff', lineSpacing: 4 }).setOrigin(0, 0.5)
     ]);
     this.tweens.add({ targets: c, alpha: 1, duration: 300 });
     [523, 659, 784, 1046].forEach((f, k) => this.time.delayedCall(k * 120, () => Sound.tone(f, 0.18, 'square', 0.05)));
@@ -2742,6 +3075,7 @@ class GameScene extends Phaser.Scene {
     e.t = 0;
     e.entered = false;
     Object.assign(e, props);
+    if (!def.ground) this.addShadow(e, false);
     if (type === 'heli') e.rotor = this.add.image(x, y, 'rotor').setDepth(6);
     if (type === 'bomber') e.hpBar = this.add.graphics().setDepth(7);
     return e;
@@ -2807,6 +3141,7 @@ class GameScene extends Phaser.Scene {
       else this.updateBomber(e, dt);
 
       if (e.rotor) { e.rotor.setPosition(e.x, e.y + 6); e.rotor.rotation += dt * 28; }
+      if (e.shadow) e.shadow.setPosition(e.x + e.sdx, e.y + e.sdy).setRotation(e.rotation);
       if (e.hpBar) {
         e.hpBar.clear();
         if (e.hp < e.maxHp) {
@@ -2915,8 +3250,13 @@ class GameScene extends Phaser.Scene {
     e.hp -= dmg;
     this.addCharge(Math.min(dmg, e.hp + dmg) * CHARGE.perDamage);
     if (e.hp <= 0) { this.killEnemy(e); return; }
-    e.setTintFill(0xffffff);
-    this.time.delayedCall(40, () => { if (e.active) e.clearTint(); });
+    const now = this.time.now;
+    if (!e.flashAt || now - e.flashAt > 110) {
+      e.flashAt = now;
+      if (e.etype === 'sboss' || e.etype === 'mboss') e.setTint(0xffb0a0);
+      else e.setTintFill(0xffffff);
+      this.time.delayedCall(45, () => { if (e.active) e.clearTint(); });
+    }
     Sound.hit();
   }
 
@@ -2948,6 +3288,7 @@ class GameScene extends Phaser.Scene {
     e.setActive(false).setVisible(false);
     if (e.rotor) e.rotor.setVisible(false);
     if (e.turret) e.turret.setVisible(false);
+    if (e.shadow) e.shadow.setVisible(false);
     if (e.hpBar) e.hpBar.clear();
     this.trash.push(e);
   }
@@ -2956,6 +3297,7 @@ class GameScene extends Phaser.Scene {
     if (e.etype === 'mboss' && this.midBoss === e) this.endMidBoss(false);   // 격파 못 하고 도망감
     if (e.rotor) { e.rotor.destroy(); e.rotor = null; }
     if (e.turret) { e.turret.destroy(); e.turret = null; }
+    if (e.shadow) { e.shadow.destroy(); e.shadow = null; }
     if (this.stageBoss === e) this.stageBoss = null;
     if (e.hpBar) { e.hpBar.destroy(); e.hpBar = null; }
     e.destroy();
@@ -2970,10 +3312,21 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ------------------------- 폭발 이펙트 ------------------------- */
+  // 비행기 그림자: 왼쪽 위에서 빛이 오므로 오른쪽 아래로 떨어짐 (높이 날수록 멀리)
+  addShadow(e, big) {
+    e.shadow = this.add.image(e.x, e.y, e.texture.key).setTintFill(0x000000)
+      .setAlpha(big ? 0.32 : 0.26).setScale(0.82).setDepth(1.6).setFlipY(e.flipY);
+    e.sdx = big ? 30 : 12 + e.width * 0.06;
+    e.sdy = big ? 44 : 18 + e.height * 0.08;
+  }
+
   explode(x, y, size, noShake) {   // size: 0 소형, 1 중형, 2 대형
-    const n = [10, 22, 42][size];
+    const n = [12, 26, 46][size];
     this.fxFire.explode(n, x, y);
-    this.fxSmoke.explode(Math.ceil(n / 3), x, y);
+    this.fxSmoke.explode(Math.ceil(n / 2), x, y);
+    this.fxDebris.explode([4, 10, 18][size], x, y);
+    const rg = this.add.image(x, y, 'ring').setDepth(15).setBlendMode(Phaser.BlendModes.ADD).setScale(0.15 + size * 0.12);
+    this.tweens.add({ targets: rg, scale: 0.7 + size * 0.8, alpha: 0, duration: 320 + size * 120, onComplete: () => rg.destroy() });
     const f = this.add.image(x, y, 'flash').setDepth(15).setBlendMode(Phaser.BlendModes.ADD)
       .setTint(0xffd27a).setScale(0.2 + size * 0.3);
     this.tweens.add({
@@ -3037,6 +3390,8 @@ class GameScene extends Phaser.Scene {
     this.flame.setVisible(false);
     this.muzzle.setVisible(false);
     this.shield.setVisible(false);
+    this.playerShadow.setVisible(false);
+    this.trail.stop();
     this.beamT = 0;
     this.drag = null;
   }
@@ -3071,6 +3426,8 @@ class GameScene extends Phaser.Scene {
     p.setPosition(GAME_W / 2, GAME_H + 50).setRotation(0).setVisible(true);
     p.body.enable = true;
     this.flame.setVisible(true);
+    this.playerShadow.setVisible(true);
+    this.trail.start();
     this.target.x = GAME_W / 2; this.target.y = GAME_H - 170;
     this.invuln = 2.5;
     this.fireTimer = 0.4;
@@ -3219,6 +3576,7 @@ class PauseScene extends Phaser.Scene {
 
   create() {
     const W = GAME_W, H = GAME_H;
+    this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
     this.add.rectangle(0, 0, W, H, 0x000814, 0.65).setOrigin(0).setInteractive();
     drawPanel(this, 40, 236, W - 80, 452);
     txt(this, W / 2, 288, 'PAUSED', 40, '#ffffff');
@@ -3260,8 +3618,8 @@ const config = {
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#0b1a2e',
-  width: GAME_W,
-  height: GAME_H,
+  width: GAME_W * ZOOM,
+  height: GAME_H * ZOOM,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { debug: false } },
   input: { activePointers: 3 },      // 이동하면서 다른 손가락으로 폭탄 버튼 누르기
