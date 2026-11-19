@@ -6,6 +6,6 @@
  * (공개용 키라서 웹페이지에 넣어도 됩니다. Secret 키·service_role 키는 절대 넣지 마세요.)
  * ===================================================================== */
 window.SS_CONFIG = {
-  supabaseUrl: '',   // 예: 'https://abcdefghijk.supabase.co'
-  supabaseKey: ''    // 예: 'sb_publishable_xxxxxxxx' 또는 'eyJhbGciOi...'
+  supabaseUrl: 'https://gawbponnvapcdupftyxl.supabase.co',
+  supabaseKey: 'sb_publishable_EPi0dxbOZAuwkzbj10mWeQ_JNPd3tFv'
 };
