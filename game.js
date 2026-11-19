@@ -54,6 +54,18 @@ const getMode = () => (Store.get('mode', 'normal') === 'arcade' ? 'arcade' : 'no
 const getBest = (mode) => Store.get('best_' + mode, mode === 'normal' ? Store.get('best', 0) : 0);
 
 /* ---------------------------------------------------------------------
+ * 조작 감도: 1~10단계 (기본 5). 손가락을 움직인 거리 대비 기체 이동량과
+ * 최고 이동속도에 함께 반영된다.
+ * ------------------------------------------------------------------- */
+const Sens = {
+  level: Math.min(10, Math.max(1, Math.round(Store.get('sens', 5)) || 5)),
+  value() { return 0.6 + (this.level - 1) * 0.18; },      // 드래그 배율 (5단계 ≈ 1.32)
+  speedMul() { return Math.max(0.5, this.value() / 1.32); }, // 최고속도 배율 (5단계 = 1)
+  set(l) { this.level = Math.min(10, Math.max(1, l)); Store.set('sens', this.level); },
+  word() { return this.level <= 3 ? '느리게' : this.level >= 8 ? '빠르게' : '보통'; }
+};
+
+/* ---------------------------------------------------------------------
  * 진동: 안드로이드 크롬·삼성 인터넷 등에서 동작, iPhone(Safari)은 미지원
  * ------------------------------------------------------------------- */
 const Haptics = {
@@ -405,6 +417,36 @@ function makeToggle(scene, x, y, w, h, labels, idx, onChange) {
     });
     c.add(z);
   });
+  draw();
+  return c;
+}
+
+// 조작 감도 조절: [−] ■■■■■□□□□□ [+]
+function makeSensControl(scene, x, y) {
+  const c = scene.add.container(x, y);
+  const label = txt(scene, 0, -12, '', 13, '#cfe3ff');
+  const bar = scene.add.graphics();
+  const draw = () => {
+    label.setText('조작 감도  ' + Sens.level + '  (' + Sens.word() + ')');
+    bar.clear();
+    for (let i = 0; i < 10; i++) {
+      bar.fillStyle(i < Sens.level ? 0x5fd3ff : 0x23405f, 1);
+      bar.fillRoundedRect(-79 + i * 16, 4, 13, 10, 3);
+    }
+  };
+  const mk = (dx, sign) => {
+    const b = scene.add.container(dx, 0);
+    const g = scene.add.graphics();
+    g.fillStyle(0x24456e, 1); g.fillCircle(0, 0, 19);
+    g.lineStyle(2, 0x6fb3ff, 0.7); g.strokeCircle(0, 0, 18);
+    b.add([g, txt(scene, 0, -1, sign > 0 ? '+' : '−', 22, '#ffffff')]);
+    b.setSize(46, 46).setInteractive({ useHandCursor: true });
+    b.on('pointerdown', () => { Sound.unlock(); Sound.click(); Sens.set(Sens.level + sign); draw(); b.setScale(0.9); });
+    b.on('pointerup', () => b.setScale(1));
+    b.on('pointerout', () => b.setScale(1));
+    return b;
+  };
+  c.add([label, bar, mk(-112, -1), mk(112, 1)]);
   draw();
   return c;
 }
@@ -767,8 +809,10 @@ class MenuScene extends Phaser.Scene {
     const sBtn = makeButton(this, W / 2 - 66, 684, 124, 44, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15).setDepth(20);
     const vBtn = makeButton(this, W / 2 + 66, 684, 124, 44, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15).setDepth(20);
 
-    txt(this, W / 2, 760, '드래그 이동 · 자동 발사 · CHARGE · BOMB', 13, '#9ec9ff').setDepth(20);
-    txt(this, W / 2, 782, 'PC: 방향키·WASD · C 차지 · SPACE 폭탄 · P 정지', 11.5, '#6f8fb5').setDepth(20);
+    makeSensControl(this, W / 2, 742).setDepth(20);
+
+    txt(this, W / 2, 790, '드래그 이동 · 자동 발사 · CHARGE · BOMB', 13, '#9ec9ff').setDepth(20);
+    txt(this, W / 2, 810, 'PC: 방향키·WASD · C 차지 · SPACE 폭탄 · P 정지', 11.5, '#6f8fb5').setDepth(20);
 
     this.hangar = this.buildHangar();
     this.ranking = this.buildRanking();
@@ -1190,7 +1234,7 @@ class GameScene extends Phaser.Scene {
     }
     const d = this.drag;
     if (!d || p.id !== d.id || s.over || s.dead) return;
-    const SENS = 1.25;
+    const SENS = Sens.value();
     const rawX = d.sx + (p.x - d.px) * SENS;
     const rawY = d.sy + (p.y - d.py) * SENS;
     this.target.x = rawX; this.target.y = rawY;
@@ -1281,7 +1325,7 @@ class GameScene extends Phaser.Scene {
       if (k.DOWN.isDown || k.S.isDown) vy += 1;
       if (vx || vy) {
         const len = Math.hypot(vx, vy);
-        const kv = 380 * (this.plane.speed / 950);
+        const kv = 380 * (this.plane.speed / 950) * Sens.speedMul();
         this.target.x += (vx / len) * kv * dt;
         this.target.y += (vy / len) * kv * dt;
         this.clampTarget();
@@ -1290,7 +1334,7 @@ class GameScene extends Phaser.Scene {
     const prevX = p.x;
     const f = Math.min(1, dt * 22);
     let mx = (this.target.x - p.x) * f, my = (this.target.y - p.y) * f;
-    const maxStep = this.plane.speed * dt, mlen = Math.hypot(mx, my);   // 기체별 최고 속도 제한
+    const maxStep = this.plane.speed * Sens.speedMul() * dt, mlen = Math.hypot(mx, my);   // 기체별 최고 속도 제한
     if (mlen > maxStep) { mx *= maxStep / mlen; my *= maxStep / mlen; }
     p.x += mx; p.y += my;
 
@@ -2281,7 +2325,7 @@ class PauseScene extends Phaser.Scene {
   create() {
     const W = GAME_W, H = GAME_H;
     this.add.rectangle(0, 0, W, H, 0x000814, 0.65).setOrigin(0).setInteractive();
-    drawPanel(this, 40, 236, W - 80, 420);
+    drawPanel(this, 40, 236, W - 80, 452);
     txt(this, W / 2, 288, 'PAUSED', 40, '#ffffff');
 
     const resume = () => { this.scene.stop(); this.scene.resume('Game'); };
@@ -2297,6 +2341,7 @@ class PauseScene extends Phaser.Scene {
     }, 'secondary', 20);
     const sBtn = makeButton(this, W / 2 - 62, 580, 116, 46, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15);
     const vBtn = makeButton(this, W / 2 + 62, 580, 116, 46, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15);
+    makeSensControl(this, W / 2, 640);
 
     if (this.input.keyboard) {
       this.input.keyboard.on('keydown-P', resume);
