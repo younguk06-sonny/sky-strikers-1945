@@ -107,11 +107,8 @@ const Haptics = {
 };
 
 /* ---------------------------------------------------------------------
- * 온라인 랭킹 (Supabase REST API, 라이브러리 없이 fetch로 호출)
- * config.js에 키가 없거나 연결이 안 되면 기기 안 기록으로 대신 보여준다.
+ * 기록 (이 기기에만 저장 — 인터넷 없이 동작)
  * ------------------------------------------------------------------- */
-const CFG = window.SS_CONFIG || {};
-
 function dedupeByNick(rows, limit) {
   const seen = new Set();
   const out = [];
@@ -127,24 +124,6 @@ function dedupeByNick(rows, limit) {
 
 const Ranking = {
   LIMIT: 15,
-  online() { return !!(CFG.supabaseUrl && CFG.supabaseKey); },
-  base() { return String(CFG.supabaseUrl).trim().replace(/\/+$/, '') + '/rest/v1/scores'; },
-  headers(extra) {
-    const key = String(CFG.supabaseKey).trim();
-    const h = { apikey: key, 'Content-Type': 'application/json' };
-    // 예전 anon 키(eyJ...)는 Authorization에도 넣고, 새 publishable 키(sb_publishable_...)는 apikey만 사용
-    if (!key.startsWith('sb_')) h.Authorization = 'Bearer ' + key;
-    return Object.assign(h, extra || {});
-  },
-  async request(url, opt) {
-    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), 7000) : null;
-    try {
-      return await fetch(url, Object.assign({}, opt, ctrl ? { signal: ctrl.signal } : {}));
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  },
   saveLocal(rec) {
     const key = 'runs_' + rec.mode;
     const list = Store.get(key, []);
@@ -153,10 +132,8 @@ const Ranking = {
     Store.set(key, list.slice(0, 40));
   },
   localTop(mode) { return dedupeByNick(Store.get('runs_' + mode, []), this.LIMIT); },
-
-  // 점수 등록: 항상 기기에 저장 + (설정돼 있으면) 서버로 전송
   async submit(rec) {
-    const row = {
+    this.saveLocal({
       nickname: rec.nickname,
       score: Math.floor(rec.score),
       mode: rec.mode,
@@ -164,35 +141,10 @@ const Ranking = {
       continues: rec.continues | 0,
       stage: rec.stage || 1,
       diff: rec.diff || 'normal'
-    };
-    this.saveLocal(row);
-    if (!this.online()) return { ok: true, online: false };
-    try {
-      const r = await this.request(this.base(), {
-        method: 'POST',
-        headers: this.headers({ Prefer: 'return=minimal' }),
-        body: JSON.stringify(row)
-      });
-      return { ok: r.ok, online: true };
-    } catch (e) {
-      return { ok: false, online: true };
-    }
+    });
+    return { ok: true };
   },
-
-  // 상위 기록: 닉네임마다 최고 점수 1개만
-  async top(mode) {
-    if (!this.online()) return { list: this.localTop(mode), source: 'local' };
-    try {
-      const url = this.base() + '?select=nickname,score,continues,stage,diff,created_at&mode=eq.' +
-        encodeURIComponent(mode) + '&order=score.desc&limit=300';
-      const r = await this.request(url, { headers: this.headers() });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const rows = await r.json();
-      return { list: dedupeByNick(rows, this.LIMIT), source: 'online' };
-    } catch (e) {
-      return { list: this.localTop(mode), source: 'error' };
-    }
-  }
+  async top(mode) { return { list: this.localTop(mode) }; }
 };
 
 /* ---------------------------------------------------------------------
@@ -209,9 +161,7 @@ const NameModal = {
       const msg = document.getElementById('nm-msg');
       document.getElementById('nm-score').textContent = subtitle;
       input.value = Store.get('nick', '');
-      const defaultMsg = Ranking.online()
-        ? '친구들과 함께 보는 온라인 랭킹에 올라가요'
-        : '온라인 랭킹 미연결 — 이 기기에만 저장돼요';
+      const defaultMsg = '이 휴대폰에 기록이 저장돼요';
       msg.textContent = defaultMsg;
       m.classList.remove('hidden');
       setTimeout(() => { try { input.focus(); } catch (e) { /* 무시 */ } }, 60);
@@ -2028,7 +1978,7 @@ class MenuScene extends Phaser.Scene {
     return c;
   }
 
-  // 랭킹 창: 모드별 상위 15명 (온라인 → 실패 시 기기 기록)
+  // 랭킹 창: 모드별 상위 15명 (이 기기 기록)
   buildRanking() {
     const W = GAME_W, H = GAME_H;
     const c = this.add.container(0, 0).setDepth(100);
@@ -2070,12 +2020,7 @@ class MenuScene extends Phaser.Scene {
     this.rankStatus.setText('불러오는 중…');
     const res = await Ranking.top(mode);
     if (token !== this.rankToken || !this.sys || !this.sys.isActive()) return;   // 그사이 탭이 바뀌었거나 화면을 떠남
-    const status = {
-      online: '온라인 랭킹 · 닉네임별 최고 점수',
-      local: '온라인 랭킹 미연결 — 이 기기 기록',
-      error: '온라인 연결 실패 — 이 기기 기록'
-    };
-    this.rankStatus.setText(status[res.source]);
+    this.rankStatus.setText('이 휴대폰 기록 · 닉네임별 최고 점수');
     if (!res.list.length) { this.rankRows[3].nick.setText('아직 기록이 없어요'); return; }
     const medal = ['#ffd166', '#dfe7f2', '#e0a274'];
     res.list.forEach((r, i) => {
@@ -4007,23 +3952,21 @@ class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: nr, alpha: 0.3, duration: 400, yoyo: true, repeat: -1 });
     }
 
-    // 랭킹 등록 (닉네임 입력 → 기기 저장 + 온라인 전송)
+    // 기록 저장 (닉네임 입력 → 이 기기에 저장)
     let submitted = false;
-    const rankBtn = makeButton(this, W / 2, 528, 240, 56, '랭킹 등록', () => {
+    const rankBtn = makeButton(this, W / 2, 528, 240, 56, '기록 저장', () => {
       if (submitted) return;
       NameModal.open(MODES[s.mode].label + ' · ' + fmt(s.score) + '점').then(async (nick) => {
         if (!nick || !rankBtn.scene) return;
         submitted = true;
-        rankBtn.label.setText('등록 중…');
+        rankBtn.label.setText('저장 중…');
         const res = await Ranking.submit({
           nickname: nick, score: s.score, mode: s.mode,
           plane: Store.get('plane', 'RAPTOR-X'), continues: s.continues,
           stage: s.cleared ? 6 : this.stageIdx + 1, diff: this.diff.key
         });
         if (!rankBtn.scene) return;
-        if (!res.online) rankBtn.label.setText('기기에 저장됨');
-        else if (res.ok) rankBtn.label.setText('등록 완료!');
-        else rankBtn.label.setText('기기에만 저장');
+        rankBtn.label.setText(res.ok ? '저장 완료!' : '저장 실패');
         rankBtn.setAlpha(0.7);
       });
     }, 'accent', 22);
