@@ -942,10 +942,10 @@ class MenuScene extends Phaser.Scene {
     this.refreshModeInfo();
 
     // 버튼
-    const start = makeButton(this, W / 2, 540, 260, 70, 'GAME START', () => this.scene.start('Game'), 'primary', 28).setDepth(20);
+    // GAME START → 조종사 선택 화면 → 출격하면 게임 시작
+    const start = makeButton(this, W / 2, 540, 260, 70, 'GAME START', () => this.openOverlay(this.hangar), 'primary', 28).setDepth(20);
     this.tweens.add({ targets: start, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-    makeButton(this, W / 2 - 66, 620, 124, 52, '기체 선택', () => this.openOverlay(this.hangar), 'secondary', 18).setDepth(20);
-    makeButton(this, W / 2 + 66, 620, 124, 52, '랭킹', () => this.openRanking(), 'accent', 20).setDepth(20);
+    makeButton(this, W / 2, 620, 256, 52, '랭킹', () => this.openRanking(), 'accent', 20).setDepth(20);
     const sBtn = makeButton(this, W / 2 - 66, 684, 124, 44, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15).setDepth(20);
     const vBtn = makeButton(this, W / 2 + 66, 684, 124, 44, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15).setDepth(20);
 
@@ -973,7 +973,7 @@ class MenuScene extends Phaser.Scene {
     const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.88).setOrigin(0).setInteractive();
     c.add([dim, drawPanel(this, 16, 40, W - 32, 790),
       txt(this, W / 2, 74, 'HANGAR', 28, '#ffffff'),
-      txt(this, W / 2, 104, '기체와 조종사를 골라 주세요', 13, '#9ec9ff')]);
+      txt(this, W / 2, 104, '조종사를 고르고 출격하세요', 13, '#9ec9ff')]);
 
     let sel = PLANES.indexOf(getPlane());
     const cw = Math.min(176, (W - 76) / 2), ch = 150;
@@ -1050,13 +1050,11 @@ class MenuScene extends Phaser.Scene {
     };
     refresh();
 
-    c.add(makeButton(this, W / 2, 780, 220, 52, '이 조종사로 출격', () => {
-      const p = PLANES[sel];
-      Store.set('plane', p.id);
-      this.planeLabel.setText(p.id + '  ·  ' + p.pilot.name + ' (' + p.pilot.nation + ')');
-      this.fly.setTexture(p.key);
-      this.closeOverlay(c);
-    }, 'primary', 20));
+    c.add(makeButton(this, W / 2 - 98, 780, 96, 52, '뒤로', () => this.closeOverlay(c), 'secondary', 18));
+    c.add(makeButton(this, W / 2 + 52, 780, 184, 52, '출격!', () => {
+      Store.set('plane', PLANES[sel].id);
+      this.scene.start('Game');
+    }, 'primary', 24));
     this.closeOverlay(c);
     return c;
   }
