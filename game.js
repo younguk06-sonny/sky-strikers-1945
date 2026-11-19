@@ -727,7 +727,7 @@ const PLANES = [
 ];
 // 조종사 (모두 이 게임을 위해 만든 가상의 인물)
 const PILOTS = {
-  'RAPTOR-X':  { name: '한서진', en: 'HAN SEO-JIN', nation: '대한민국', flag: 'flag_kr', face: 'pilot_han', age: 27,
+  'RAPTOR-X':  { name: '한영웅', en: 'HAN YEONG-UNG', nation: '대한민국', flag: 'flag_kr', face: 'pilot_han', age: 27,
                  role: '편대장 · 침착한 전략가', quote: '"하늘은 우리가 지킨다."' },
   'PHANTOM-Z': { name: '클레르 뒤부아', en: 'CLAIRE DUBOIS', nation: '프랑스', flag: 'flag_fr', face: 'pilot_claire', age: 24,
                  role: '최연소 에이스 · 스피드광', quote: '"따라올 수 있으면 따라와 봐!"' },
@@ -1204,7 +1204,7 @@ function jetEnemy(x) {         // 44×44 적 제트기 (아래를 향함, 회색
 }
 
 /* ---------- 조종사 얼굴 (64×64) ---------- */
-function drawPilotHan(g) {          // 한서진: 검은 포니테일, 빨간 머플러, 이마 위 고글
+function drawPilotHan(g) {          // 한영웅: 검은 포니테일, 빨간 머플러, 이마 위 고글
   g.fillStyle(0x1d3d66, 1); g.fillCircle(32, 32, 32);
   g.fillStyle(0x161616, 1); g.fillEllipse(32, 27, 40, 40); g.fillEllipse(52, 40, 10, 22);
   g.fillStyle(0x3b5b7a, 1); g.fillEllipse(32, 64, 54, 26);
