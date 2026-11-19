@@ -1618,6 +1618,30 @@ class BootScene extends Phaser.Scene {
     ctex('plane_phantom', 56, 56, jetPhantom);
     ctex('plane_thunder', 56, 56, jetThunder);
     ctex('plane_blaze', 56, 56, jetBlaze);
+    // 좌우 이동 시 날개를 기울인(뱅크) 그림: 단계 ±1~±3
+    // 내려가는 쪽 날개는 짧고 어둡게, 올라가는 쪽은 길고 밝게
+    [['player', jetRaptor], ['plane_phantom', jetPhantom], ['plane_thunder', jetThunder], ['plane_blaze', jetBlaze]].forEach(([key, fn]) => {
+      for (let k = -3; k <= 3; k++) {
+        if (!k) continue;
+        const a = Math.abs(k), right = k > 0;
+        const sDown = 1 - 0.19 * a, sUp = 1 - 0.02 * a;
+        ctex(key + '_b' + k, 56, 56, (x) => {
+          [[0, 28, right ? sUp : sDown], [28, 56, right ? sDown : sUp]].forEach(([x0, x1, sc]) => {
+            x.save();
+            x.beginPath(); x.rect(x0, 0, x1 - x0, 56); x.clip();
+            x.translate(28, 28 + (x0 === 0) * 0); x.scale(sc, 1); x.translate(-28, -28);
+            fn(x);
+            x.restore();
+          });
+          x.globalCompositeOperation = 'source-atop';
+          const g = x.createLinearGradient(0, 0, 56, 0);
+          const lit = 'rgba(255,255,255,' + (0.07 * a) + ')', dark = 'rgba(0,10,25,' + (0.15 * a) + ')';
+          g.addColorStop(0, right ? lit : dark); g.addColorStop(0.5, 'rgba(0,0,0,0)'); g.addColorStop(1, right ? dark : lit);
+          x.fillStyle = g; x.fillRect(0, 0, 56, 56);
+          x.globalCompositeOperation = 'source-over';
+        });
+      }
+    });
     tex('missile', 8, 22, (g) => {
       g.fillStyle(0xffa63d, 0.9); g.fillEllipse(4, 18, 4, 8);
       g.fillStyle(0x8c99a8, 1); g.fillTriangle(0, 14, 4, 9, 4, 15); g.fillTriangle(8, 14, 4, 9, 4, 15);
@@ -2140,6 +2164,7 @@ class GameScene extends Phaser.Scene {
     this.islandT = 3;
     this.cloudT = 1;
     this.invuln = 1.5;
+    this.bank = 0;           // 좌우 기울기 -1(왼쪽) ~ 1(오른쪽)
     this.drag = null;
     this.trash = [];
     this.floatCount = 0;
@@ -2529,8 +2554,14 @@ class GameScene extends Phaser.Scene {
     if (mlen > maxStep) { mx *= maxStep / mlen; my *= maxStep / mlen; }
     p.x += mx; p.y += my;
 
-    const tilt = clamp((p.x - prevX) / Math.max(dt, 0.001) * 0.0006, -0.22, 0.22);
-    p.rotation += (tilt - p.rotation) * 0.2;
+    // 좌우 속도에 따라 날개 기울이기 (부드럽게 들어가고 천천히 복귀)
+    const vx = (p.x - prevX) / Math.max(dt, 0.001);
+    const want = clamp(vx / 420, -1, 1);
+    this.bank += (want - this.bank) * Math.min(1, dt * (Math.abs(want) > Math.abs(this.bank) ? 12 : 6));
+    const lvl = Math.round(this.bank * 3);
+    const key = lvl ? this.plane.key + '_b' + lvl : this.plane.key;
+    if (p.texture.key !== key) { p.setTexture(key); this.playerShadow.setTexture(key); }
+    p.rotation += (this.bank * 0.07 - p.rotation) * 0.25;
 
     this.playerShadow.setPosition(p.x + 18, p.y + 28).setRotation(p.rotation);
     this.flame.setPosition(p.x - Math.sin(p.rotation) * 30, p.y + Math.cos(p.rotation) * 30)
