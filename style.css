@@ -14,12 +14,10 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 가운데 정렬은 Phaser(autoCenter)가 직접 하므로 여기서는 하지 않는다 (이중 정렬 시 화면이 한쪽으로 밀림) */
 #game {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 #game canvas {

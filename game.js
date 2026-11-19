@@ -15,8 +15,9 @@ if (!window.Phaser) {
   throw new Error('Phaser not loaded');
 }
 
-const GAME_W = 390;
 const GAME_H = 844;
+// 폰 화면 비율에 맞춰 가로 폭을 390~480 사이에서 정한다 → 양옆 빈 공간 최소화
+const GAME_W = Math.round(Math.min(480, Math.max(390, GAME_H * (window.innerWidth / Math.max(1, window.innerHeight)))));
 const FONT = "'Russo One', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif";
 
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
@@ -304,12 +305,18 @@ const Sound = {
 /* ---------------------------------------------------------------------
  * 게임 데이터
  * ------------------------------------------------------------------- */
+// 전투기 4종: hp(일반 모드 하트), armor(오락실 모드 목숨마다 방어막), speed(최고 이동속도), inv(피격 후 무적시간)
 const PLANES = [
-  { id: 'RAPTOR-X',  type: '균형형',   atk: 3, spd: 3, def: 3, desc: '기관포 + 유도미사일', unlocked: true },
-  { id: 'PHANTOM-Z', type: '고속형',   atk: 2, spd: 5, def: 2, desc: '관통 레이저',       unlocked: false },
-  { id: 'THUNDER-A', type: '중장갑형', atk: 4, spd: 2, def: 5, desc: '확산탄',            unlocked: false },
-  { id: 'BLAZE-F',   type: '공격형',   atk: 5, spd: 3, def: 2, desc: '폭발형 특수탄',     unlocked: false }
+  { id: 'RAPTOR-X',  key: 'player',        type: '균형형',   atk: 3, spd: 3, def: 3,
+    desc: '쌍발 기관포 + 유도미사일', note: '미사일이 알아서 적을 쫓아가요', hp: 3, armor: 0, speed: 950, inv: 1.8 },
+  { id: 'PHANTOM-Z', key: 'plane_phantom', type: '고속형',   atk: 3, spd: 5, def: 2,
+    desc: '적을 꿰뚫는 관통 레이저', note: '가장 빠른 기체 · 일렬로 선 적에 강함', hp: 3, armor: 0, speed: 1400, inv: 1.5 },
+  { id: 'THUNDER-A', key: 'plane_thunder', type: '중장갑형', atk: 4, spd: 2, def: 5,
+    desc: '5갈래 확산탄', note: '일반: 하트 4개 · 오락실: 목숨마다 방어막', hp: 4, armor: 1, speed: 680, inv: 2.2 },
+  { id: 'BLAZE-F',   key: 'plane_blaze',   type: '공격형',   atk: 5, spd: 3, def: 2,
+    desc: '맞으면 터지는 폭발탄', note: '폭발이 주변 적까지 함께 피해', hp: 3, armor: 0, speed: 950, inv: 1.5 }
 ];
+const getPlane = () => PLANES.find((p) => p.id === Store.get('plane', 'RAPTOR-X')) || PLANES[0];
 
 // 적 3종: 체력·점수·충돌 반경·폭발 크기 (폭격기는 지금 단계의 중간 보스)
 const ENEMY = {
@@ -429,6 +436,50 @@ function drawPlayer(g, c) {
   g.fillStyle(0x333a44, 1); g.fillRect(16, 21, 2, 6); g.fillRect(38, 21, 2, 6);
 }
 
+function drawPhantom(g) { // 보라색 삼각날개 고속기
+  const c = 0x7b4fd6, dark = 0x4e2f99, light = 0xa98bf0;
+  g.fillStyle(dark, 1); g.fillTriangle(28, 14, 3, 46, 53, 46);
+  g.fillStyle(c, 1); g.fillTriangle(28, 11, 4, 43, 52, 43);
+  g.fillStyle(light, 1); g.fillTriangle(28, 20, 14, 40, 18, 40); g.fillTriangle(28, 20, 42, 40, 38, 40);
+  g.fillStyle(dark, 1); g.fillTriangle(22, 42, 27, 34, 25, 54); g.fillTriangle(34, 42, 29, 34, 31, 54);
+  g.fillStyle(0xcfd6e0, 1); g.fillRoundedRect(24, 3, 8, 48, 4);
+  g.fillStyle(0x5fd3ff, 1); g.fillTriangle(24, 9, 32, 9, 28, 0);
+  g.fillStyle(0x1d2f45, 1); g.fillEllipse(28, 21, 5, 11);
+  g.fillStyle(0x8fd3ff, 1); g.fillEllipse(27, 19, 2, 4);
+  g.fillStyle(0x5fd3ff, 0.9); g.fillRect(9, 41, 6, 2); g.fillRect(41, 41, 6, 2);
+}
+
+function drawThunder(g) { // 초록색 쌍동 중장갑기
+  const c = 0x5d8a3c, dark = 0x3c5c26, light = 0x86b562;
+  g.fillStyle(dark, 1); g.fillRoundedRect(1, 26, 54, 13, 5);
+  g.fillStyle(c, 1); g.fillRoundedRect(1, 24, 54, 12, 5);
+  g.fillStyle(light, 1); g.fillRect(5, 25, 46, 2);
+  g.fillStyle(dark, 1); g.fillRoundedRect(9, 10, 10, 42, 5); g.fillRoundedRect(37, 10, 10, 42, 5);
+  g.fillStyle(c, 1); g.fillRoundedRect(10, 11, 8, 38, 4); g.fillRoundedRect(38, 11, 8, 38, 4);
+  g.fillStyle(dark, 1); g.fillRoundedRect(9, 46, 38, 7, 3);
+  g.fillStyle(0xf2c14e, 1); g.fillCircle(14, 11, 3.5); g.fillCircle(42, 11, 3.5);
+  g.fillStyle(0x1b1b1b, 0.75); g.fillRect(6, 8, 16, 2); g.fillRect(34, 8, 16, 2);
+  g.fillStyle(0xaab4bf, 1); g.fillRoundedRect(22, 13, 12, 26, 6);
+  g.fillStyle(0x1d2f45, 1); g.fillEllipse(28, 22, 6, 11);
+  g.fillStyle(0x8fd3ff, 1); g.fillEllipse(27, 20, 2.5, 4);
+  g.fillStyle(0xffffff, 1); g.fillCircle(14, 34, 3); g.fillCircle(42, 34, 3);
+  g.fillStyle(0xe63946, 1); g.fillCircle(14, 34, 1.5); g.fillCircle(42, 34, 1.5);
+}
+
+function drawBlaze(g) { // 주황·빨강 공격기
+  const c = 0xd9482b, dark = 0x96301b;
+  g.fillStyle(dark, 1); g.fillPoints([{ x: 2, y: 37 }, { x: 20, y: 25 }, { x: 36, y: 25 }, { x: 54, y: 37 }, { x: 54, y: 42 }, { x: 2, y: 42 }], true);
+  g.fillStyle(c, 1); g.fillPoints([{ x: 2, y: 35 }, { x: 20, y: 23 }, { x: 36, y: 23 }, { x: 54, y: 35 }, { x: 54, y: 39 }, { x: 2, y: 39 }], true);
+  g.fillStyle(0xffc93c, 1); g.fillTriangle(7, 37, 17, 28, 21, 37); g.fillTriangle(49, 37, 39, 28, 35, 37);
+  g.fillStyle(dark, 1); g.fillRoundedRect(16, 45, 24, 7, 3);
+  g.fillStyle(0x3a3f47, 1); g.fillRoundedRect(22, 5, 12, 47, 6);
+  g.fillStyle(0x5a616b, 1); g.fillRoundedRect(24, 6, 6, 42, 3);
+  g.fillStyle(c, 1); g.fillTriangle(22, 12, 34, 12, 28, 2);
+  g.fillStyle(0x1b1b1b, 0.75); g.fillRect(17, 3, 22, 2);
+  g.fillStyle(0x1d2f45, 1); g.fillEllipse(28, 22, 7, 11);
+  g.fillStyle(0xffb347, 1); g.fillEllipse(27, 20, 2.5, 4);
+}
+
 function drawFighter(g) { // 44×44, 기수가 아래
   g.fillStyle(0x7a2424, 1); g.fillRoundedRect(12, 2, 20, 6, 3);
   g.fillStyle(0x7a2424, 1); g.fillRoundedRect(1, 17, 42, 11, 5);
@@ -495,6 +546,28 @@ class BootScene extends Phaser.Scene {
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
     tex('player', 56, 56, (g) => drawPlayer(g, 0x3b78c4));
+    tex('plane_phantom', 56, 56, drawPhantom);
+    tex('plane_thunder', 56, 56, drawThunder);
+    tex('plane_blaze', 56, 56, drawBlaze);
+    tex('laser', 10, 36, (g) => {
+      g.fillStyle(0x5fd3ff, 0.4); g.fillRoundedRect(0, 0, 10, 36, 5);
+      g.fillStyle(0xe6fbff, 1); g.fillRoundedRect(3, 2, 4, 32, 2);
+    });
+    tex('shell', 14, 14, (g) => {
+      g.fillStyle(0xff6a00, 0.45); g.fillCircle(7, 7, 7);
+      g.fillStyle(0xffb347, 1); g.fillCircle(7, 7, 5);
+      g.fillStyle(0xffffff, 1); g.fillCircle(7, 7, 2.5);
+    });
+    tex('missile', 8, 22, (g) => {
+      g.fillStyle(0xffa63d, 0.9); g.fillEllipse(4, 18, 4, 8);
+      g.fillStyle(0x8c99a8, 1); g.fillTriangle(0, 14, 4, 9, 4, 15); g.fillTriangle(8, 14, 4, 9, 4, 15);
+      g.fillStyle(0xe8eef4, 1); g.fillRoundedRect(2, 0, 4, 15, 2);
+      g.fillStyle(0xe63946, 1); g.fillRect(2, 1, 4, 2);
+    });
+    tex('shield', 72, 72, (g) => {
+      g.fillStyle(0x7fe3ff, 0.12); g.fillCircle(36, 36, 33);
+      g.lineStyle(3, 0x7fe3ff, 0.85); g.strokeCircle(36, 36, 32);
+    });
     tex('e_fighter', 44, 44, drawFighter);
     tex('e_heli', 52, 64, drawHeli);
     tex('rotor', 72, 72, drawRotor);
@@ -589,7 +662,7 @@ class MenuScene extends Phaser.Scene {
       c.speed = randInt(50, 90);
       this.clouds.push(c);
     }
-    this.fly = this.add.image(W * 0.3, H + 80, 'player').setDepth(5).setScale(1.15);
+    this.fly = this.add.image(W * 0.3, H + 80, getPlane().key).setDepth(5).setScale(1.15);
     this.flyFlame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(4).setScale(1.15);
     this.flyEnemies = [];
     for (let i = 0; i < 3; i++) this.flyEnemies.push(this.add.image(70 + i * 125, -80 - i * 170, 'e_fighter').setDepth(5));
@@ -649,50 +722,69 @@ class MenuScene extends Phaser.Scene {
   openOverlay(c) { c.setVisible(true); setInputEnabled(c, true); }
   closeOverlay(c) { c.setVisible(false); setInputEnabled(c, false); }
 
-  // 기체 선택 창 (1차 버전은 RAPTOR-X만 사용 가능)
+  // 기체 선택 창: 4종 카드 중 하나를 눌러 고르고 '확인'
   buildHangar() {
     const W = GAME_W, H = GAME_H;
     const c = this.add.container(0, 0).setDepth(100);
     const dim = this.add.rectangle(0, 0, W, H, 0x000814, 0.85).setOrigin(0).setInteractive();
-    c.add([dim, drawPanel(this, 20, 90, W - 40, 640), txt(this, W / 2, 130, 'HANGAR', 30, '#ffffff'), txt(this, W / 2, 163, '기체 선택', 14, '#9ec9ff')]);
+    c.add([dim, drawPanel(this, 20, 64, W - 40, 744),
+      txt(this, W / 2, 102, 'HANGAR', 30, '#ffffff'),
+      txt(this, W / 2, 134, '기체를 눌러 선택하세요', 14, '#9ec9ff')]);
 
-    const p = PLANES[0];
-    const card = this.add.graphics();
-    card.fillStyle(0x163256, 1); card.fillRoundedRect(40, 190, W - 80, 250, 16);
-    card.lineStyle(2.5, 0xffc93c, 0.9); card.strokeRoundedRect(40, 190, W - 80, 250, 16);
-    const plane = this.add.image(100, 300, 'player').setScale(1.7);
-    this.tweens.add({ targets: plane, y: 292, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-    c.add([card, plane,
-      this.add.text(160, 212, p.id, { fontFamily: FONT, fontSize: '26px', color: '#ffffff' }),
-      this.add.text(160, 246, p.type, { fontFamily: FONT, fontSize: '15px', color: '#ffd166' })]);
+    let sel = PLANES.indexOf(getPlane());
+    const cw = Math.min(170, (W - 84) / 2), ch = 172;
+    const cards = [];
+    PLANES.forEach((pl, i) => {
+      const cx = W / 2 + (i % 2 === 0 ? -1 : 1) * (cw / 2 + 6);
+      const cy = 248 + Math.floor(i / 2) * (ch + 12);
+      const g = this.add.graphics();
+      const img = this.add.image(cx, cy - 24, pl.key);
+      const z = this.add.zone(cx, cy, cw, ch).setInteractive({ useHandCursor: true });
+      z.on('pointerup', () => { sel = i; Sound.unlock(); Sound.click(); refresh(); });
+      cards.push({ g, img, cx, cy });
+      c.add([g, img, txt(this, cx, cy + 44, pl.id, 16, '#ffffff'), txt(this, cx, cy + 66, pl.type, 13, '#ffd166'), z]);
+    });
+
+    // 선택한 기체 상세
+    const box = this.add.graphics();
+    box.fillStyle(0x0b1a2e, 0.7); box.fillRoundedRect(36, 538, W - 72, 172, 14);
+    const dTitle = txt(this, W / 2, 562, '', 18, '#ffffff');
     const bars = this.add.graphics();
-    [['공격력', p.atk], ['속도', p.spd], ['방어력', p.def]].forEach(([label, v], i) => {
-      const y = 288 + i * 34;
-      c.add(this.add.text(160, y - 9, label, { fontFamily: FONT, fontSize: '14px', color: '#cfe3ff' }));
-      for (let k = 0; k < 5; k++) {
-        bars.fillStyle(k < v ? 0x5fd3ff : 0x23405f, 1);
-        bars.fillRoundedRect(215 + k * 24, y - 6, 20, 12, 3);
-      }
-    });
-    c.add(bars);
-    c.add(txt(this, W / 2, 410, p.desc + ' (미사일은 2차 버전)', 14, '#cfe3ff'));
+    const statLabels = ['공격력', '속도', '방어력'].map((l, k) =>
+      this.add.text(W / 2 - 105, 596 + k * 26, l, { fontFamily: FONT, fontSize: '14px', color: '#cfe3ff' }).setOrigin(0, 0.5));
+    const dDesc = txt(this, W / 2, 676, '', 14, '#e8f1ff');
+    const dNote = txt(this, W / 2, 696, '', 12, '#9ec9ff');
+    c.add([box, dTitle, bars, dDesc, dNote].concat(statLabels));
 
-    c.add(txt(this, W / 2, 474, '추가 기체 — 2차 버전에서 열려요', 14, '#9ec9ff'));
-    PLANES.slice(1).forEach((pl, i) => {
-      const cx = W / 2 - 104 + i * 104;
-      const cg = this.add.graphics();
-      cg.fillStyle(0x112238, 1); cg.fillRoundedRect(cx - 48, 498, 96, 150, 12);
-      cg.lineStyle(1.5, 0x35567e, 1); cg.strokeRoundedRect(cx - 48, 498, 96, 150, 12);
-      const sil = this.add.image(cx, 556, 'player').setTintFill(0x0a1626);
-      const lock = this.add.graphics();
-      lock.lineStyle(3, 0x9ec9ff, 1); lock.beginPath(); lock.arc(cx, 552, 7, Math.PI, 0); lock.strokePath();
-      lock.fillStyle(0x9ec9ff, 1); lock.fillRoundedRect(cx - 10, 552, 20, 15, 3);
-      c.add([cg, sil, lock, txt(this, cx, 610, pl.id, 13, '#e8f1ff'), txt(this, cx, 630, pl.type, 12, '#6f8fb5')]);
-    });
+    const refresh = () => {
+      cards.forEach((cd, i) => {
+        const on = i === sel;
+        cd.g.clear();
+        cd.g.fillStyle(on ? 0x1d3d66 : 0x112238, 1);
+        cd.g.fillRoundedRect(cd.cx - cw / 2, cd.cy - ch / 2, cw, ch, 14);
+        cd.g.lineStyle(on ? 3 : 1.5, on ? 0xffc93c : 0x35567e, 1);
+        cd.g.strokeRoundedRect(cd.cx - cw / 2, cd.cy - ch / 2, cw, ch, 14);
+        cd.img.setScale(on ? 1.4 : 1.1).setAlpha(on ? 1 : 0.75);
+      });
+      const p = PLANES[sel];
+      dTitle.setText(p.id + '  ·  ' + p.type);
+      bars.clear();
+      [p.atk, p.spd, p.def].forEach((v, k) => {
+        for (let n = 0; n < 5; n++) {
+          bars.fillStyle(n < v ? 0x5fd3ff : 0x23405f, 1);
+          bars.fillRoundedRect(W / 2 - 35 + n * 24, 590 + k * 26, 20, 12, 3);
+        }
+      });
+      dDesc.setText(p.desc);
+      dNote.setText(p.note);
+    };
+    refresh();
 
-    c.add(makeButton(this, W / 2, 690, 220, 54, '확인', () => {
+    c.add(makeButton(this, W / 2, 756, 220, 54, '확인', () => {
+      const p = PLANES[sel];
       Store.set('plane', p.id);
       this.planeLabel.setText('기체  ' + p.id);
+      this.fly.setTexture(p.key);
       this.closeOverlay(c);
     }, 'primary', 22));
     this.closeOverlay(c);
@@ -790,12 +882,14 @@ class GameScene extends Phaser.Scene {
   create() {
     const W = GAME_W, H = GAME_H;
     const mode = getMode();
+    const plane = (this.plane = getPlane());
 
     // ---- 상태 초기화 (재시작 때마다 새로 만든다) ----
     this.state = {
       mode,
       score: 0, combo: 0, comboTimer: 0, elapsed: 0, kills: 0,
-      hp: NORMAL.hp, maxHp: NORMAL.hp,                         // 일반 모드
+      hp: plane.hp, maxHp: plane.hp,                           // 일반 모드 (기체마다 하트 수 다름)
+      armor: mode === 'arcade' ? plane.armor : 0,              // 오락실 모드 방어막 (THUNDER-A)
       lives: ARCADE.lives, credits: ARCADE.credits, continues: 0, // 오락실 모드
       bombs: mode === 'arcade' ? ARCADE.bombsPerLife : NORMAL.bombs,
       dead: false,     // 오락실 모드에서 격추되어 다시 나오기 전
@@ -805,6 +899,7 @@ class GameScene extends Phaser.Scene {
     };
     this.fireTimer = 0;
     this.muzzleT = 0;
+    this.missileT = 0.5;
     this.bombT = 0;
     this.spawnT = 1.6;
     this.islandT = 3;
@@ -822,16 +917,18 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < 3; i++) this.spawnCloud(randInt(0, H));
 
     // ---- 플레이어 ----
-    this.player = this.physics.add.sprite(W / 2, H - 170, 'player').setDepth(10);
+    this.player = this.physics.add.sprite(W / 2, H - 170, plane.key).setDepth(10);
     this.player.body.moves = false;
     this.player.body.setCircle(7, 21, 15);   // 판정은 조종석 주변의 작은 원
     this.flame = this.add.image(0, 0, 'flame').setOrigin(0.5, 0.1).setDepth(9);
     this.muzzle = this.add.image(0, 0, 'flash').setDepth(11).setScale(0.3)
       .setTint(0xffe27a).setBlendMode(Phaser.BlendModes.ADD).setVisible(false);
+    this.shield = this.add.image(0, 0, 'shield').setDepth(11).setVisible(false);
+    this.shieldBreaking = false;
     this.target = { x: this.player.x, y: this.player.y };
 
     // ---- 오브젝트 그룹 (탄은 재사용 풀) ----
-    this.pBullets = this.physics.add.group({ maxSize: 90 });
+    this.pBullets = this.physics.add.group({ maxSize: 140 });
     this.eBullets = this.physics.add.group({ maxSize: 260 });
     this.enemies = this.physics.add.group();
 
@@ -901,7 +998,7 @@ class GameScene extends Phaser.Scene {
     const count = s.mode === 'arcade' ? ARCADE.lives : s.maxHp;
     for (let i = 0; i < count; i++) {
       const icon = s.mode === 'arcade'
-        ? this.add.image(W - 76 - i * 27, 35, 'player').setScale(0.4)
+        ? this.add.image(W - 76 - i * 27, 35, this.plane.key).setScale(0.4)
         : this.add.image(W - 76 - i * 27, 35, 'heart');
       this.lifeIcons.push(icon.setDepth(50));
     }
@@ -1048,7 +1145,7 @@ class GameScene extends Phaser.Scene {
       this.clearBullets(0, 0, Infinity, false);
     }
     this.updateEnemies(dt);
-    this.updateBullets();
+    this.updateBullets(dt);
   }
 
   scrollBackground(dt) {
@@ -1090,21 +1187,30 @@ class GameScene extends Phaser.Scene {
       if (k.DOWN.isDown || k.S.isDown) vy += 1;
       if (vx || vy) {
         const len = Math.hypot(vx, vy);
-        this.target.x += (vx / len) * 380 * dt;
-        this.target.y += (vy / len) * 380 * dt;
+        const kv = 380 * (this.plane.speed / 950);
+        this.target.x += (vx / len) * kv * dt;
+        this.target.y += (vy / len) * kv * dt;
         this.clampTarget();
       }
     }
     const prevX = p.x;
     const f = Math.min(1, dt * 22);
-    p.x += (this.target.x - p.x) * f;
-    p.y += (this.target.y - p.y) * f;
+    let mx = (this.target.x - p.x) * f, my = (this.target.y - p.y) * f;
+    const maxStep = this.plane.speed * dt, mlen = Math.hypot(mx, my);   // 기체별 최고 속도 제한
+    if (mlen > maxStep) { mx *= maxStep / mlen; my *= maxStep / mlen; }
+    p.x += mx; p.y += my;
 
     const tilt = clamp((p.x - prevX) / Math.max(dt, 0.001) * 0.0006, -0.22, 0.22);
     p.rotation += (tilt - p.rotation) * 0.2;
 
     this.flame.setPosition(p.x - Math.sin(p.rotation) * 26, p.y + Math.cos(p.rotation) * 26)
       .setRotation(p.rotation).setScale(0.9 + Math.random() * 0.2, 0.8 + Math.random() * 0.55);
+
+    if (!this.shieldBreaking) {
+      const on = this.state.armor > 0;
+      this.shield.setVisible(on);
+      if (on) this.shield.setPosition(p.x, p.y).setAlpha(0.65 + Math.sin(this.state.elapsed * 6) * 0.25);
+    }
 
     if (this.invuln > 0) {
       this.invuln -= dt;
@@ -1114,16 +1220,36 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ------------------------- 발사 ------------------------- */
+  // 기체별 무기
   updateFiring(dt) {
+    const p = this.player, id = this.plane.id;
     this.fireTimer -= dt;
     if (this.fireTimer <= 0) {
-      this.fireTimer = Math.max(0, this.fireTimer + 0.1);   // 초당 10회 자동 발사
-      const p = this.player;
-      this.firePlayerBullet(p.x - 7, p.y - 22);
-      this.firePlayerBullet(p.x + 7, p.y - 22);
+      const rate = { 'RAPTOR-X': 0.1, 'PHANTOM-Z': 0.065, 'THUNDER-A': 0.15, 'BLAZE-F': 0.17 }[id];
+      this.fireTimer = Math.max(0, this.fireTimer + rate);
+      if (id === 'PHANTOM-Z') {
+        this.firePlayerBullet(p.x, p.y - 32, { kind: 'laser', vy: -1300, dmg: 0.8, pierce: true });
+      } else if (id === 'THUNDER-A') {
+        [-0.32, -0.16, 0, 0.16, 0.32].forEach((a) =>
+          this.firePlayerBullet(p.x + a * 30, p.y - 22, { kind: 'pb', angle: a, speed: 840, dmg: 1 }));
+      } else if (id === 'BLAZE-F') {
+        this.firePlayerBullet(p.x - 8, p.y - 22, { kind: 'shell', vy: -720, dmg: 2, splash: true });
+        this.firePlayerBullet(p.x + 8, p.y - 22, { kind: 'shell', vy: -720, dmg: 2, splash: true });
+      } else {
+        this.firePlayerBullet(p.x - 7, p.y - 22, { kind: 'pb', vy: -920, dmg: 1 });
+        this.firePlayerBullet(p.x + 7, p.y - 22, { kind: 'pb', vy: -920, dmg: 1 });
+      }
       this.muzzle.setVisible(true).setPosition(p.x, p.y - 30).setScale(0.24 + Math.random() * 0.12);
       this.muzzleT = 0.04;
       Sound.shoot();
+    }
+    // RAPTOR-X: 양쪽 날개에서 유도미사일
+    if (id === 'RAPTOR-X') {
+      this.missileT -= dt;
+      if (this.missileT <= 0) {
+        this.missileT = 0.75;
+        [-1, 1].forEach((sd) => this.firePlayerBullet(p.x + sd * 18, p.y - 4, { kind: 'missile', vx: sd * 160, vy: -260, dmg: 2 }));
+      }
     }
     if (this.muzzleT > 0) {
       this.muzzleT -= dt;
@@ -1131,13 +1257,38 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  firePlayerBullet(x, y) {
-    const b = this.pBullets.get(x, y, 'pb');
+  firePlayerBullet(x, y, o) {
+    const b = this.pBullets.get(x, y, o.kind);
     if (!b) return;
+    b.setTexture(o.kind === 'pb' ? 'pb' : o.kind);
     b.enableBody(true, x, y, true, true);
     b.setDepth(8);
-    b.body.setSize(4, 18);
-    b.setVelocity(0, -920);
+    b.kind = o.kind;
+    b.dmg = o.dmg;
+    b.pierce = !!o.pierce;
+    b.splash = !!o.splash;
+    b.life = 0;
+    b.target = null;
+    if (b.pierce) { if (b.hits) b.hits.clear(); else b.hits = new Set(); }
+    const size = { pb: [4, 18], laser: [6, 32], shell: [10, 10], missile: [6, 14] }[o.kind];
+    b.body.setSize(size[0], size[1]);
+    if (o.angle !== undefined) {
+      b.setRotation(o.angle);
+      b.setVelocity(Math.sin(o.angle) * o.speed, -Math.cos(o.angle) * o.speed);
+    } else {
+      b.setRotation(o.vx ? Math.atan2(o.vx, -o.vy) : 0);
+      b.setVelocity(o.vx || 0, o.vy);
+    }
+  }
+
+  nearestEnemy(x, y) {
+    let best = null, bd = Infinity;
+    this.enemies.getChildren().forEach((e) => {
+      if (!e.active || e.y < 0 || e.y > GAME_H) return;
+      const d = Phaser.Math.Distance.Squared(x, y, e.x, e.y);
+      if (d < bd) { bd = d; best = e; }
+    });
+    return best;
   }
 
   // 적 탄: 판정 원은 그림보다 작게 잡아 억울한 피격을 줄인다
@@ -1171,10 +1322,23 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < n; i++) this.fireEnemyBullet(x, y, off + (i * Math.PI * 2) / n, speed, false);
   }
 
-  updateBullets() {
+  updateBullets(dt) {
     const W = GAME_W, H = GAME_H;
     this.pBullets.children.each((b) => {
-      if (b.active && b.y < -30) b.disableBody(true, true);
+      if (!b.active) return;
+      if (b.kind === 'missile') {
+        b.life += dt;
+        if (!b.target || !b.target.active) b.target = this.nearestEnemy(b.x, b.y);
+        const v = b.body.velocity;
+        let ang = Math.atan2(v.y, v.x);
+        const spd = Math.min(650, Math.hypot(v.x, v.y) + 900 * dt);
+        const want = b.target && b.life > 0.12 ? Phaser.Math.Angle.Between(b.x, b.y, b.target.x, b.target.y) : -Math.PI / 2;
+        ang = Phaser.Math.Angle.RotateTo(ang, want, 6 * dt);
+        this.physics.velocityFromRotation(ang, spd, v);
+        b.setRotation(ang + Math.PI / 2);
+        if (b.life > 3) { b.disableBody(true, true); return; }
+      }
+      if (b.y < -40 || b.y > H + 40 || b.x < -40 || b.x > W + 40) b.disableBody(true, true);
     });
     this.eBullets.children.each((b) => {
       if (b.active && (b.y < -40 || b.y > H + 40 || b.x < -40 || b.x > W + 40)) b.disableBody(true, true);
@@ -1386,9 +1550,25 @@ class GameScene extends Phaser.Scene {
   /* ------------------------- 충돌 처리 ------------------------- */
   onBulletHitEnemy(b, e) {
     if (!b.active || !e.active) return;
-    b.disableBody(true, true);
-    this.fxHit.explode(4, b.x, b.y - 6);
-    this.damageEnemy(e, 1);
+    if (b.pierce) {                       // 관통 레이저: 같은 적은 한 번만
+      if (b.hits.has(e)) return;
+      b.hits.add(e);
+    } else {
+      b.disableBody(true, true);
+    }
+    this.fxHit.explode(b.pierce ? 2 : 4, b.x, b.y - 6);
+    if (b.splash) this.splashDamage(b.x, b.y, e);
+    this.damageEnemy(e, b.dmg || 1);
+  }
+
+  // 폭발탄: 주변 적에게도 피해
+  splashDamage(x, y, hitEnemy) {
+    this.fxFire.explode(6, x, y);
+    const f = this.add.image(x, y, 'flash').setDepth(15).setBlendMode(Phaser.BlendModes.ADD).setTint(0xff9a3d).setScale(0.3);
+    this.tweens.add({ targets: f, scale: 1.1, alpha: 0, duration: 180, onComplete: () => f.destroy() });
+    this.enemies.getChildren().slice().forEach((o) => {
+      if (o !== hitEnemy && o.active && Phaser.Math.Distance.Between(x, y, o.x, o.y) < 52) this.damageEnemy(o, 1);
+    });
   }
 
   onPlayerHitBullet(p, b) {
@@ -1476,6 +1656,7 @@ class GameScene extends Phaser.Scene {
   /* ------------------------- 피격 ------------------------- */
   hurtPlayer() {
     const s = this.state;
+    if (s.mode === 'arcade' && s.armor > 0) { s.armor--; this.breakShield(); return; }
     Sound.hurt();
     this.cameras.main.shake(180, 0.012);
     this.clearBullets(this.player.x, this.player.y, 150, true);
@@ -1487,12 +1668,28 @@ class GameScene extends Phaser.Scene {
       this.explode(this.player.x, this.player.y, 0);
       Haptics.vibrate(90);
       if (s.hp <= 0) { this.gameOver(); return; }
-      this.invuln = 1.8;
+      this.invuln = this.plane.inv;
     } else {
       s.lives--;
       this.updateLifeUi();
       this.playerDown();
     }
+  }
+
+  // THUNDER-A 방어막: 한 번 막아 주고 깨짐
+  breakShield() {
+    const p = this.player;
+    Sound.hit(); Sound.tone(520, 0.25, 'triangle', 0.08, 180);
+    Haptics.vibrate(60);
+    this.fxHit.explode(14, p.x, p.y);
+    this.clearBullets(p.x, p.y, 130, true);
+    this.invuln = 1.2;
+    this.shieldBreaking = true;
+    this.shield.setVisible(true).setPosition(p.x, p.y).setAlpha(1).setScale(1);
+    this.tweens.add({
+      targets: this.shield, scale: 1.8, alpha: 0, duration: 300,
+      onComplete: () => { this.shield.setScale(1); this.shieldBreaking = false; }
+    });
   }
 
   hidePlayer() {
@@ -1501,6 +1698,7 @@ class GameScene extends Phaser.Scene {
     p.body.enable = false;
     this.flame.setVisible(false);
     this.muzzle.setVisible(false);
+    this.shield.setVisible(false);
     this.drag = null;
   }
 
@@ -1524,6 +1722,7 @@ class GameScene extends Phaser.Scene {
     const s = this.state, p = this.player;
     s.dead = false;
     s.bombs = ARCADE.bombsPerLife;           // 새 기체마다 폭탄 보충
+    s.armor = this.plane.armor;              // 방어막도 다시
     this.updateBombUi();
     p.setPosition(GAME_W / 2, GAME_H + 50).setRotation(0).setVisible(true);
     p.body.enable = true;
