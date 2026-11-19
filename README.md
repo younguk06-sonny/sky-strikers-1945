@@ -44,6 +44,9 @@ alter table scores enable row level security;
 
 create policy "누구나 랭킹 보기" on scores for select using (true);
 create policy "누구나 점수 등록" on scores for insert with check (true);
+
+grant usage on schema public to anon;
+grant select, insert on public.scores to anon;
 ```
 
 ### 3) 키 2개 복사해서 config.js에 넣기

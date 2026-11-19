@@ -96,13 +96,13 @@ function dedupeByNick(rows, limit) {
 const Ranking = {
   LIMIT: 15,
   online() { return !!(CFG.supabaseUrl && CFG.supabaseKey); },
-  base() { return String(CFG.supabaseUrl).replace(/\/+$/, '') + '/rest/v1/scores'; },
+  base() { return String(CFG.supabaseUrl).trim().replace(/\/+$/, '') + '/rest/v1/scores'; },
   headers(extra) {
-    return Object.assign({
-      apikey: CFG.supabaseKey,
-      Authorization: 'Bearer ' + CFG.supabaseKey,
-      'Content-Type': 'application/json'
-    }, extra || {});
+    const key = String(CFG.supabaseKey).trim();
+    const h = { apikey: key, 'Content-Type': 'application/json' };
+    // 예전 anon 키(eyJ...)는 Authorization에도 넣고, 새 publishable 키(sb_publishable_...)는 apikey만 사용
+    if (!key.startsWith('sb_')) h.Authorization = 'Bearer ' + key;
+    return Object.assign(h, extra || {});
   },
   async request(url, opt) {
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
