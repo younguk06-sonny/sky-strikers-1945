@@ -249,7 +249,6 @@ const Sound = {
   lastShot: 0, lastHit: 0,
 
   unlock() {
-    if (!this.on) return;
     try {
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -263,7 +262,11 @@ const Sound = {
         const d = this.noiseBuf.getChannelData(0);
         for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       }
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.ctx.state === 'suspended') {
+        const pr = this.ctx.resume();
+        if (pr && pr.then) pr.then(() => { if (typeof Music !== 'undefined') Music.kick(); });
+      }
+      if (typeof Music !== 'undefined') Music.kick();
     } catch (e) { this.ctx = null; }
   },
   ok() { return this.on && this.ctx && this.ctx.state === 'running'; },
@@ -332,8 +335,253 @@ const Sound = {
     Store.set('sound', this.on);
     if (this.on) this.unlock();
   },
-  label() { return this.on ? '사운드 ON' : '사운드 OFF'; }
+  label() { return this.on ? '효과음 ON' : '효과음 OFF'; }
 };
+
+/* ---------------------------------------------------------------------
+ * 배경음악: 이 게임을 위해 새로 작곡한 군대 행진곡풍 곡 (저작권 문제 없음)
+ * 음원 파일 없이 WebAudio로 실시간 연주한다.
+ *   menu  : 위풍당당한 행진곡 (D단조)
+ *   stage : 질주하는 전투곡 (스테이지마다 조를 바꿔 분위기 변화)
+ *   boss  : 긴박한 보스전
+ *   clear : 승리 팡파르 / over : 패배 테마
+ * ------------------------------------------------------------------- */
+const NOTE_IDX = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
+const midiOf = (n) => { const m = n.match(/^([A-G](?:#|b)?)(-?\d)$/); return 12 * (+m[2] + 1) + NOTE_IDX[m[1]]; };
+const CHORDS = {
+  Dm: ['D', 'F', 'A'], Bb: ['Bb', 'D', 'F'], C: ['C', 'E', 'G'], A: ['A', 'C#', 'E'], Gm: ['G', 'Bb', 'D'],
+  Eb: ['Eb', 'G', 'Bb'], F: ['F', 'A', 'C'], Cs: ['C#', 'E', 'G']
+};
+const BASS_ROOT = { Dm: 'D2', Bb: 'Bb1', C: 'C2', A: 'A1', Gm: 'G1', Eb: 'Eb2', F: 'F2', Cs: 'C#2' };
+
+// 곡 만들기 도우미: ev = [스텝, 악기, 음높이(MIDI), 길이(스텝), 세기]
+function melody(ev, inst, list, vel, start) {
+  let st = start || 0;
+  list.forEach(([n, d]) => { if (n !== '-') ev.push([st, inst, midiOf(n), d, vel]); st += d; });
+}
+function pads(ev, prog, oct, vel) {
+  prog.forEach((c, b) => CHORDS[c].forEach((n) => ev.push([b * 16, 'strings', midiOf(n + oct), 16, vel])));
+}
+function marchDrums(ev, bars, fillLast) {
+  const pat = [1, 0, 0, .6, 1, 0, .6, 0, 1, 0, 0, .6, 1, .6, .6, .6];
+  for (let b = 0; b < bars; b++) pat.forEach((v, i) => { if (v) ev.push([b * 16 + i, 'snare', 0, 1, v]); });
+  if (fillLast) for (let i = 8; i < 16; i++) ev.push([(bars - 1) * 16 + i, 'snare', 0, 1, 0.5 + i * 0.03]);
+}
+
+function buildSongs() {
+  const S = {};
+  // ── 메인 메뉴: 행진곡 ──
+  {
+    const ev = [], prog = ['Dm', 'Bb', 'C', 'A', 'Dm', 'Gm', 'A', 'Dm'];
+    melody(ev, 'brass', [
+      ['D5', 4], ['A4', 2], ['D5', 2], ['F5', 4], ['E5', 2], ['D5', 2],
+      ['F5', 6], ['D5', 2], ['Bb4', 4], ['C5', 2], ['D5', 2],
+      ['E5', 4], ['C5', 2], ['E5', 2], ['G5', 4], ['F5', 2], ['E5', 2],
+      ['A5', 6], ['G5', 2], ['E5', 4], ['C#5', 4],
+      ['D5', 4], ['A4', 2], ['D5', 2], ['F5', 4], ['A5', 4],
+      ['Bb5', 4], ['A5', 2], ['G5', 2], ['F5', 4], ['G5', 2], ['Bb5', 2],
+      ['A5', 4], ['E5', 4], ['C#5', 4], ['E5', 4],
+      ['D5', 12], ['-', 4]], 0.9);
+    pads(ev, prog, 4, 0.6);
+    prog.forEach((c, b) => {
+      const r = midiOf(BASS_ROOT[c]);
+      [0, 4, 8, 12].forEach((st, k) => ev.push([b * 16 + st, 'bass', k % 2 ? r + 7 : r, 3, 0.9]));
+      ev.push([b * 16, 'timp', r + 12, 4, 0.9]);
+      ev.push([b * 16 + 8, 'timp', r + 12, 4, 0.6]);
+    });
+    marchDrums(ev, 8, true);
+    ev.push([0, 'crash', 0, 8, 0.7]);
+    S.menu = { bpm: 104, len: 128, loop: true, ev };
+  }
+  // ── 스테이지: 전투곡 ──
+  {
+    const ev = [], prog = ['Dm', 'C', 'Bb', 'A', 'Dm', 'C', 'Bb', 'A'];
+    melody(ev, 'lead', [
+      ['A4', 2], ['D5', 2], ['F5', 2], ['A5', 4], ['G5', 2], ['F5', 2], ['E5', 2],
+      ['G5', 4], ['E5', 2], ['C5', 2], ['E5', 4], ['D5', 2], ['C5', 2],
+      ['D5', 4], ['Bb4', 2], ['D5', 2], ['F5', 4], ['E5', 2], ['D5', 2],
+      ['E5', 6], ['C#5', 2], ['A4', 8],
+      ['A4', 2], ['D5', 2], ['F5', 2], ['A5', 4], ['Bb5', 2], ['A5', 2], ['G5', 2],
+      ['G5', 4], ['C6', 4], ['Bb5', 2], ['A5', 2], ['G5', 4],
+      ['F5', 4], ['D5', 2], ['F5', 2], ['Bb5', 4], ['A5', 2], ['G5', 2],
+      ['A5', 8], ['E5', 4], ['C#5', 4]], 0.8);
+    pads(ev, prog, 3, 0.45);
+    prog.forEach((c, b) => {
+      const r = midiOf(BASS_ROOT[c]);
+      [0, 0, 12, 0, 0, 7, 12, 7].forEach((o, k) => ev.push([b * 16 + k * 2, 'bass', r + o, 2, 0.85]));
+      [0, 6, 10].forEach((st) => CHORDS[c].forEach((n) => ev.push([b * 16 + st, 'stab', midiOf(n + '3'), 1, 0.5])));
+      [0, 8].forEach((st) => ev.push([b * 16 + st, 'kick', 0, 1, 1]));
+      ev.push([b * 16 + 14, 'kick', 0, 1, 0.6]);
+      [4, 12].forEach((st) => ev.push([b * 16 + st, 'snare', 0, 1, 1]));
+      for (let i = 0; i < 16; i += 2) ev.push([b * 16 + i, 'hat', 0, 1, i % 4 ? 0.5 : 0.8]);
+    });
+    for (let i = 8; i < 16; i++) ev.push([7 * 16 + i, 'snare', 0, 1, 0.45 + i * 0.03]);
+    ev.push([0, 'crash', 0, 8, 0.6]);
+    S.stage = { bpm: 138, len: 128, loop: true, ev };
+  }
+  // ── 보스전 ──
+  {
+    const ev = [], prog = ['Dm', 'Eb', 'Dm', 'Cs'];
+    prog.forEach((c, b) => {
+      const r = midiOf(BASS_ROOT[c]);
+      for (let i = 0; i < 16; i++) ev.push([b * 16 + i, 'bass', r + (i % 4 === 2 ? 12 : 0), 1, i % 4 === 0 ? 1 : 0.6]);
+      [0, 3, 6, 10].forEach((st) => { ev.push([b * 16 + st, 'stab', r + 12, 2, 0.8]); ev.push([b * 16 + st, 'stab', r + 19, 2, 0.6]); });
+      for (let i = 0; i < 16; i++) ev.push([b * 16 + i, 'trem', midiOf(CHORDS[c][i % 2 ? 1 : 0] + '5'), 1, 0.35]);
+      [0, 4, 8, 12].forEach((st) => ev.push([b * 16 + st, 'kick', 0, 1, 1]));
+      for (let i = 0; i < 16; i++) ev.push([b * 16 + i, 'snare', 0, 1, (i === 4 || i === 12) ? 1 : 0.28]);
+      ev.push([b * 16, 'timp', r + 12, 4, 1]);
+    });
+    melody(ev, 'lead', [['A5', 2], ['Bb5', 2], ['A5', 2], ['G#5', 2], ['A5', 8], ['D6', 4], ['C#6', 4], ['A5', 8]], 0.8, 32);
+    ev.push([0, 'crash', 0, 8, 0.8]);
+    S.boss = { bpm: 150, len: 64, loop: true, ev };
+  }
+  // ── 스테이지 클리어 팡파르 ──
+  {
+    const ev = [];
+    melody(ev, 'lead', [['C5', 2], ['C5', 1], ['C5', 1], ['F5', 4], ['A5', 4], ['C6', 4], ['C6', 12]], 1);
+    CHORDS.F.forEach((n) => ev.push([16, 'brass', midiOf(n + '4'), 14, 0.8]));
+    for (let i = 0; i < 16; i++) ev.push([i, 'snare', 0, 1, 0.3 + i * 0.04]);
+    ev.push([16, 'crash', 0, 8, 1]); ev.push([16, 'timp', midiOf('F2'), 6, 1]);
+    S.clear = { bpm: 120, len: 32, loop: false, ev };
+  }
+  // ── 게임 오버 ──
+  {
+    const ev = [];
+    melody(ev, 'brass', [['A4', 4], ['G4', 4], ['F4', 4], ['E4', 4], ['D4', 16]], 0.8);
+    pads(ev, ['Dm', 'Dm'], 3, 0.5);
+    ev.push([16, 'timp', midiOf('D2'), 8, 1]);
+    S.over = { bpm: 76, len: 32, loop: false, ev };
+  }
+  Object.values(S).forEach((song) => {   // 스텝별로 묶어 두기
+    song.at = {};
+    song.ev.forEach((e) => (song.at[e[0]] = song.at[e[0]] || []).push(e));
+  });
+  return S;
+}
+
+const Music = {
+  on: Store.get('music', true),
+  songs: null, cur: null, opts: {}, step: 0, nextTime: 0, timer: null, bus: null, paused: false,
+  label() { return this.on ? '음악 ON' : '음악 OFF'; },
+  toggle() {
+    this.on = !this.on;
+    Store.set('music', this.on);
+    if (this.on) { Sound.unlock(); this.kick(); } else this.halt();
+  },
+  // 곡 바꾸기 (같은 곡이면 무시). opts.tr = 조옮김(반음), opts.bpm = 빠르기 추가
+  play(name, opts) {
+    const o = opts || {};
+    if (this.cur === name && (this.opts.tr || 0) === (o.tr || 0) && this.timer) return;
+    this.halt();
+    this.cur = name; this.opts = o; this.step = 0;
+    this.kick();
+  },
+  kick() {   // 오디오가 준비되면 재생 시작 (첫 터치 전에는 대기)
+    if (!this.on || !this.cur || this.timer || this.paused) return;
+    const ctx = Sound.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    if (!this.songs) this.songs = buildSongs();
+    if (!this.bus) {
+      this.bus = ctx.createGain();
+      this.bus.gain.value = 0.3;
+      const comp = ctx.createDynamicsCompressor();
+      this.bus.connect(comp); comp.connect(ctx.destination);
+      const len = ctx.sampleRate;
+      this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    this.nextTime = ctx.currentTime + 0.08;
+    this.timer = setInterval(() => this.tick(), 25);
+  },
+  halt() { if (this.timer) clearInterval(this.timer); this.timer = null; },
+  pause(p) { this.paused = p; if (p) this.halt(); else this.kick(); },
+  tick() {
+    const ctx = Sound.ctx, song = this.songs && this.songs[this.cur];
+    if (!ctx || !song) { this.halt(); return; }
+    const stepDur = 60 / (song.bpm + (this.opts.bpm || 0)) / 4;
+    while (this.nextTime < ctx.currentTime + 0.15) {
+      if (!song.loop && this.step >= song.len) { this.halt(); this.cur = null; return; }
+      const evs = song.at[this.step % song.len];
+      if (evs) evs.forEach((e) => this.voice(e[1], e[2] + (e[1] === 'snare' || e[1] === 'kick' || e[1] === 'hat' || e[1] === 'crash' ? 0 : (this.opts.tr || 0)), e[3] * stepDur, e[4], this.nextTime));
+      this.nextTime += stepDur;
+      this.step++;
+    }
+  },
+  // 악기 소리 합성
+  voice(inst, midi, dur, vel, t) {
+    const ctx = Sound.ctx, out = this.bus;
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
+    const env = (g, a, peak, hold, rel) => {
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + a);
+      g.gain.setValueAtTime(peak, t + Math.max(a, hold));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(a, hold) + rel);
+    };
+    const noiseSrc = () => { const s = ctx.createBufferSource(); s.buffer = this.noise; return s; };
+    try {
+      if (inst === 'brass' || inst === 'lead' || inst === 'stab') {
+        const g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        const top = inst === 'lead' ? 3200 : inst === 'stab' ? 1800 : 2400;
+        lp.frequency.setValueAtTime(500, t); lp.frequency.exponentialRampToValueAtTime(top, t + 0.05);
+        lp.frequency.exponentialRampToValueAtTime(top * 0.5, t + Math.max(0.1, dur));
+        [-7, 7].forEach((det) => {
+          const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det;
+          o.connect(lp); o.start(t); o.stop(t + dur + 0.2);
+        });
+        lp.connect(g); g.connect(out);
+        const peak = (inst === 'lead' ? 0.13 : inst === 'stab' ? 0.07 : 0.11) * vel;
+        env(g, inst === 'stab' ? 0.01 : 0.03, peak, inst === 'stab' ? 0.05 : dur * 0.85, inst === 'stab' ? 0.08 : 0.12);
+      } else if (inst === 'strings' || inst === 'trem') {
+        const g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = inst === 'trem' ? 2600 : 1600;
+        [-9, 9].forEach((det) => {
+          const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det;
+          o.connect(lp); o.start(t); o.stop(t + dur + 0.5);
+        });
+        lp.connect(g); g.connect(out);
+        if (inst === 'trem') env(g, 0.005, 0.035 * vel, dur * 0.6, 0.04);
+        else env(g, 0.25, 0.045 * vel, dur * 0.9, 0.35);
+      } else if (inst === 'bass') {
+        const g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 700;
+        const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f;
+        const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = f / 2;
+        o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(out);
+        o.start(t); o2.start(t); o.stop(t + dur + 0.1); o2.stop(t + dur + 0.1);
+        env(g, 0.008, 0.16 * vel, dur * 0.7, 0.06);
+      } else if (inst === 'timp' || inst === 'kick') {
+        const g = ctx.createGain(), o = ctx.createOscillator(); o.type = 'sine';
+        const f0 = inst === 'kick' ? 120 : f;
+        o.frequency.setValueAtTime(f0 * (inst === 'kick' ? 1.6 : 1.15), t);
+        o.frequency.exponentialRampToValueAtTime(inst === 'kick' ? 45 : f0, t + (inst === 'kick' ? 0.12 : 0.08));
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + 1);
+        env(g, 0.004, (inst === 'kick' ? 0.5 : 0.45) * vel, 0.02, inst === 'kick' ? 0.22 : 0.7);
+      } else if (inst === 'snare') {
+        const s = noiseSrc(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+        bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 0.7;
+        s.connect(bp); bp.connect(g); g.connect(out); s.start(t); s.stop(t + 0.2);
+        env(g, 0.002, 0.3 * vel, 0.01, 0.11);
+        const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'triangle'; o.frequency.value = 190;
+        o.connect(og); og.connect(out); o.start(t); o.stop(t + 0.1);
+        env(og, 0.002, 0.12 * vel, 0.005, 0.06);
+      } else if (inst === 'hat' || inst === 'crash') {
+        const s = noiseSrc(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+        hp.type = 'highpass'; hp.frequency.value = inst === 'hat' ? 8000 : 4500;
+        s.connect(hp); hp.connect(g); g.connect(out); s.start(t); s.stop(t + (inst === 'hat' ? 0.06 : 1.4));
+        env(g, 0.002, (inst === 'hat' ? 0.05 : 0.14) * vel, 0.005, inst === 'hat' ? 0.03 : 1.2);
+      }
+    } catch (e) { /* 무시 */ }
+  }
+};
+
+// 첫 터치(아무 곳이나)에 오디오를 깨워 메뉴 음악이 바로 나오게, 앱 전환 시 소리 멈춤
+document.addEventListener('pointerdown', () => Sound.unlock(), { passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (!Sound.ctx) return;
+  try { if (document.hidden) Sound.ctx.suspend(); else Sound.ctx.resume(); } catch (e) { /* 무시 */ }
+});
 
 /* ---------------------------------------------------------------------
  * 게임 데이터
@@ -1475,6 +1723,7 @@ class MenuScene extends Phaser.Scene {
 
     // 최고 점수 · 선택 기체
     this.mode = getMode();
+    Music.play('menu');
     const pill = this.add.graphics().setDepth(10);
     pill.fillStyle(0x000814, 0.55); pill.fillRoundedRect(W / 2 - 130, 308, 260, 66, 18);
     pill.lineStyle(1.5, 0xffd166, 0.5); pill.strokeRoundedRect(W / 2 - 130, 308, 260, 66, 18);
@@ -1504,8 +1753,9 @@ class MenuScene extends Phaser.Scene {
     const start = makeButton(this, W / 2, 568, 260, 66, 'GAME START', () => this.openOverlay(this.hangar), 'primary', 28).setDepth(20);
     this.tweens.add({ targets: start, scale: 1.04, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     makeButton(this, W / 2, 642, 256, 48, '랭킹', () => this.openRanking(), 'accent', 20).setDepth(20);
-    const sBtn = makeButton(this, W / 2 - 66, 700, 124, 42, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15).setDepth(20);
-    const vBtn = makeButton(this, W / 2 + 66, 700, 124, 42, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15).setDepth(20);
+    const sBtn = makeButton(this, W / 2 - 88, 700, 84, 42, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 13).setDepth(20);
+    const mBtn = makeButton(this, W / 2, 700, 84, 42, Music.label(), () => mBtn.label.setText((Music.toggle(), Music.label())), 'secondary', 13).setDepth(20);
+    const vBtn = makeButton(this, W / 2 + 88, 700, 84, 42, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 13).setDepth(20);
 
     makeSensControl(this, W / 2, 754).setDepth(20);
 
@@ -1865,6 +2115,7 @@ class GameScene extends Phaser.Scene {
     this.buildHud();
 
     this.showStageTitle();
+    this.playStageMusic();
     const banner = txt(this, W / 2, H / 2 - 160, mode === 'arcade' ? 'ARCADE MODE' : 'NORMAL MODE', 16, '#9ec9ff', { stroke: '#000000', strokeThickness: 4 }).setDepth(40);
     const pilotFace = this.add.image(W / 2 - 70, H / 2 + 10, plane.pilot.face).setScale(0.8).setDepth(40);
     const pilotLine = this.add.text(W / 2 - 38, H / 2 + 10, plane.pilot.name + '\n' + plane.pilot.quote, {
@@ -2909,6 +3160,11 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // 스테이지마다 조와 빠르기를 바꿔 같은 곡도 분위기가 달라지게
+  playStageMusic() {
+    Music.play('stage', { tr: [0, 2, -2, 3, 5][this.stageIdx], bpm: this.stageIdx * 4 });
+  }
+
   showStageTitle() {
     const W = GAME_W, H = GAME_H, st = STAGES[this.stageIdx];
     const t1 = txt(this, W / 2, H / 2 - 120, 'STAGE ' + (this.stageIdx + 1), 44, '#ffe066', { stroke: '#3a1d00', strokeThickness: 7 }).setDepth(41);
@@ -2920,6 +3176,7 @@ class GameScene extends Phaser.Scene {
 
   startBossWarning() {
     const W = GAME_W, H = GAME_H, id = STAGES[this.stageIdx].boss, def = BOSSES[id];
+    Music.play('boss', { tr: [0, 2, -2, 3, 5][this.stageIdx] });
     this.warningOn = true;
     const band = this.add.rectangle(0, H / 2 - 80, W, 140, 0xb00020, 0.4).setOrigin(0, 0.5).setDepth(44);
     const t1 = txt(this, W / 2, H / 2 - 104, 'WARNING!!', 50, '#ff3b4e', { stroke: '#2a0008', strokeThickness: 8 }).setDepth(45);
@@ -3047,6 +3304,7 @@ class GameScene extends Phaser.Scene {
 
   stageClear(bonus) {
     if (this.state.over) return;
+    Music.play('clear');
     const s = this.state;
     let reward;
     if (s.mode === 'normal' && s.hp < s.maxHp) { s.hp++; this.updateLifeUi(); reward = '하트 +1 회복'; }
@@ -3084,6 +3342,7 @@ class GameScene extends Phaser.Scene {
       this.invuln = 2.5;
       cam.fadeIn(500, 0, 0, 0);
       this.showStageTitle();
+      this.playStageMusic();
     });
   }
 
@@ -3540,6 +3799,7 @@ class GameScene extends Phaser.Scene {
   finishGame(delay) {
     const s = this.state;
     if (s.over) return;
+    Music.play(s.cleared ? 'clear' : 'over');
     s.over = true;
     s.frozen = false;
     this.physics.resume();
@@ -3624,19 +3884,23 @@ class PauseScene extends Phaser.Scene {
     drawPanel(this, 40, 236, W - 80, 452);
     txt(this, W / 2, 288, 'PAUSED', 40, '#ffffff');
 
-    const resume = () => { this.scene.stop(); this.scene.resume('Game'); };
+    Music.pause(true);
+    const resume = () => { Music.pause(false); this.scene.stop(); this.scene.resume('Game'); };
     makeButton(this, W / 2, 368, 240, 62, 'RESUME', resume, 'primary', 26);
     makeButton(this, W / 2, 440, 240, 52, 'RESTART', () => {
       const game = this.scene.get('Game');
+      Music.pause(false);
       this.scene.stop();
       game.scene.restart();
     }, 'secondary', 20);
     makeButton(this, W / 2, 504, 240, 52, 'MENU', () => {
+      Music.pause(false);
       this.scene.stop('Game');
       this.scene.start('Menu');
     }, 'secondary', 20);
-    const sBtn = makeButton(this, W / 2 - 62, 580, 116, 46, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 15);
-    const vBtn = makeButton(this, W / 2 + 62, 580, 116, 46, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 15);
+    const sBtn = makeButton(this, W / 2 - 88, 580, 84, 44, Sound.label(), () => sBtn.label.setText((Sound.toggle(), Sound.label())), 'secondary', 13);
+    const mBtn = makeButton(this, W / 2, 580, 84, 44, Music.label(), () => mBtn.label.setText((Music.toggle(), Music.label())), 'secondary', 13);
+    const vBtn = makeButton(this, W / 2 + 88, 580, 84, 44, Haptics.label(), () => vBtn.label.setText((Haptics.toggle(), Haptics.label())), 'secondary', 13);
     makeSensControl(this, W / 2, 640);
 
     if (this.input.keyboard) {
